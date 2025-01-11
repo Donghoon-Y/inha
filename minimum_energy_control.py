@@ -36,8 +36,8 @@ u_hat = sla.lsqr(G,x_des - np.linalg.matrix_power(A,n)@x_0)[0]
 
 u_vec = u_hat
 
-u_opt = u_vec.reshape(1000,2).T
- 
+u_opt = u_vec.reshape(1000,2).T #2가 묶음 단위 reshape 2*1000은 다른 결과
+
 x = np.zeros((4,n+1))
 x[:,0] = x_0
 

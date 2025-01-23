@@ -50,7 +50,7 @@ def equations(t,y) :
     vdot = - mu / (rmag**3) * r
     return np.hstack([rdot, vdot])
 
-sol = solve_ivp(equations, tspan, initial_state, t_eval =teval)
+sol = solve_ivp(equations, tspan, initial_state, t_eval=teval, method='DOP853', atol=1e-9, rtol=1e-9)
 
 x, y, z = sol.y[:3, :]
 

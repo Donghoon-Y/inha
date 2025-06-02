@@ -9,4 +9,5 @@ function xdot = odeTwoBody(t,x,mu)
     rdot = v;
     vdot = - mu / rmag^3 * r;
     xdot = [rdot ; vdot];
+    
 end

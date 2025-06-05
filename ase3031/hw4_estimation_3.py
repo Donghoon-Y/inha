@@ -10,11 +10,11 @@ uk = []
 psi = []
 yk = []
 for i in k :
-    uk_cal = np.sin(0.2*(i-1)) + 0.1*np.random.normal(0, 0.1)
+    uk_cal = np.sin(0.2*(i-1)) + 0.1*np.random.normal(0, np.sqrt(0.1))
     uk.append(uk_cal)
 
 for i in range(1, len(k)) :
-    yk_cal = np.array([uk[i], uk[i-1]]).T @ theta_true + np.random.normal(0, 0.01)
+    yk_cal = np.array([uk[i], uk[i-1]]).T @ theta_true + np.random.normal(0, np.sqrt(0.01))
     yk.append(yk_cal)
 
 for i in range(1,len(k)) :
@@ -40,7 +40,7 @@ tracePk = [np.trace(P0)]
 #동역학?모델과 초기 추정치를 이용하여 추정치 전파
 for i in range(0,21) :
     wk = np.random.multivariate_normal(np.zeros(2), Q).reshape(2, 1)
-    x_true_next = A_true @ x_true[-1] + wk
+    x_true_next = A_true @ x_true[i] + wk
     x_true.append(x_true_next)
     xk_cal = A@xk[i]
     xk.append(xk_cal)

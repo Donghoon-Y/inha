@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 np.random.seed(0)  # For reproducibility
-
+######3.1######
 k = range(2,22,1)
 theta_true = np.array([2, -0.5])
 
@@ -10,7 +10,7 @@ uk = []
 psi = []
 yk = []
 for i in k :
-    uk_cal = np.sin(0.2*(i-1)) + 0.1*np.random.normal(0, np.sqrt(0.1))
+    uk_cal = np.sin(0.2*(i-1)) + 0.1*np.random.normal(0, 1)
     uk.append(uk_cal)
 
 for i in range(1, len(k)) :
@@ -24,6 +24,7 @@ for i in range(1,len(k)) :
 theta_hat = np.linalg.inv(np.array(psi).T @ np.array(psi)) @ np.array(psi).T @ yk
 print("Estimated Parameters:", theta_hat)
 
+######3.2#####
 #상태 전파를 위한 행렬을 theta hat을 이용하여 구성한다
 A = np.array([[theta_hat[0], 1],[theta_hat[1], 0]])
 A_true = np.array([[2, 1], [-0.5, 0]])  # 참값
@@ -71,7 +72,7 @@ error2 = (np.array(x2) - np.array(x2_true))
 
 time = range(len(x1))
 
-#3.3 컴퓨터로 증명 
+######3.3 컴퓨터로 증명#####
 eigenvalue = np.linalg.eigvals(A)
 print(f'eigenvalue : {eigenvalue}')
 

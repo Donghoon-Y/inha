@@ -1,11 +1,12 @@
 import numpy as np
 from matplotlib import pyplot as plt
+R_list = [0.01, 0.1, 1.0, 10.0]
 
 np.random.seed(0)
-theta_true = np.array([2, -0.5])
-A = np.array([[theta_true[0], 1],[theta_true[1], 0]])
-H = np.array([1,0]).T
-R = 0.01
+theta_hat = np.array([1.88351422, -0.36621749])
+A = np.array([[theta_hat[0], 1],[theta_hat[1], 0]])
+H = np.array([[1,0]])
+R = 0.05
 P0 = 0.1*np.eye(2)
 Q = 0.01 * np.eye(2)
 
@@ -31,19 +32,22 @@ P_history = []
 P_trace_history = []
 
 for i in range(len(xk)) :
-    xk_cal = A@xhat[i] 
-    Pk_cal = A@Pk[i]@A.T + Q
-    xhat.append(xk_cal)
-    Pk.append(Pk_cal)
-
+    x_pred = A@xhat[i] 
+    P_pred = A@Pk[i]@A.T + Q
+    xhat.append(x_pred)
+    Pk.append(P_pred)
     #칼만게인을 이용하여 수치 업데이트 
-    Kk = Pk_cal@H.T/(R+H@Pk_cal@H.T)
-    x_hat_update = xk_cal + Kk*(yk[i] - H@xk_cal)
-    Pk_update = (np.eye(2)-Kk@H) @ Pk_cal @ (np.eye(2)-Kk@H).T + (Kk*R)@ Kk.T
-    P_history.append(Pk_update)
-    P_trace_history.append(np.trace(Pk_update))
+    Kk = P_pred@H.T / (R+H@P_pred@H.T)
+    residual = yk[i] - H@x_pred
+    x_hat_update = x_pred + Kk @ residual
+    I = np.eye(2)
+    P_update = (I - Kk @ H) @ P_pred @ (I - Kk @ H).T + R* Kk @ Kk.T
+    P_history.append(P_update)
+    P_trace_history.append(np.trace(P_update))
     x_hat_history.append(x_hat_update)
 
+x_true1 = []
+x_true2 = []
 x_hat1 = []
 x_hat2 = []
 sigma1 = []
@@ -61,20 +65,26 @@ for P in P_history :
     sigma1.append(sigma1_cal)
     sigma2.append(sigma2_cal)
 
-time = range(len(x_hat1))
-print(H.T)
+for x in xk[:len(x_hat1)] :
+    x_true1.append(x[0,0])
+    x_true2.append(x[1,0])
 
-plt.plot(time, x_hat1, 'x-',label='Estimated x1')
-plt.fill_between(time, np.array(x_hat1) - 3 * np.array(sigma1), np.array(x_hat1) + 3 * np.array(sigma1), alpha=0.3, label='±3σ interval')
+error1 = np.array(x_hat1) - np.array(x_true1)
+error2 = np.array(x_hat2) - np.array(x_true2)
+
+time = range(len(x_hat1))
+
+plt.plot(time, error1 ,label='Estimated x1')
+plt.fill_between(time, - 3 * np.array(sigma1), + 3 * np.array(sigma1), alpha=0.3, label='±3σ interval')
 plt.title("State Estimate x1 with ±3σ Confidence Interval")
 plt.xlabel("Time Step k")
-plt.ylabel("x1")
+plt.ylabel("Error x1")
 plt.legend()
 plt.grid(True)
 plt.show()
 
-plt.plot(time, x_hat2, 'x-',label='Estimated x2')
-plt.fill_between(time,np.array(x_hat2) - 3 * np.array(sigma2), np.array(x_hat2) + 3 * np.array(sigma2), alpha=0.3, label='±3σ interval')
+plt.plot(time, error2,label='Estimated x2')
+plt.fill_between(time, - 3 * np.array(sigma2), + 3 * np.array(sigma2), alpha=0.3, label='±3σ interval')
 plt.title("State Estimate x2 with ±3σ Confidence Interval")
 plt.xlabel("Time Step k")
 plt.ylabel("x2")
@@ -90,3 +100,5 @@ plt.ylabel("trace(Pk)")
 plt.grid(True)
 plt.show()
 
+diff = np.abs(np.diff(P_trace_history))
+print("마지막 Trace(Pk) 변화량:", diff[-5:])

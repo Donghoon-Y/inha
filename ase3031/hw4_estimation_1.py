@@ -9,6 +9,14 @@ least_squares_beta = 4
 weighted_least_squares_alpha = 0.98532
 weighted_least_squares_beta = 1.044
 
+rss_ls = []
+rss_wls = []
+
+for i in range(0,len(x)) :
+    rss_ls.append((y[i]-(least_squares_alpha + least_squares_beta*x[i]))**2)
+    rss_wls.append((y[i]-(weighted_least_squares_alpha + weighted_least_squares_beta*x[i]))**2)
+
+
 function_least_squares = lambda x: least_squares_alpha + least_squares_beta * x
 function_weighted_least_squares = lambda x: weighted_least_squares_alpha + weighted_least_squares_beta * x
 
@@ -22,3 +30,7 @@ plt.title('Least Squares vs Weighted Least Squares')
 plt.grid(True)
 plt.legend()
 plt.show()
+
+print(rss_ls)
+print(rss_wls)
+print(sum(rss_wls))

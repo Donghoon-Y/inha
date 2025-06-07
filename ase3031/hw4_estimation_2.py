@@ -65,4 +65,6 @@ plt.title("Udated Parameters θ₁")
 plt.grid(True)
 plt.legend()
 plt.show()
-print(P_diag_history)
+
+print(theta_history, P_diag_history) #2.3
+print(theta_history_2, theta_history_2) #2.2

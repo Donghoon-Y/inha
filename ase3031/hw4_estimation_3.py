@@ -26,7 +26,7 @@ print("Estimated Parameters:", theta_hat)
 
 ######3.2#####
 #상태 전파를 위한 행렬을 theta hat을 이용하여 구성한다
-A = np.array([[theta_hat[0], 1],[theta_hat[1], 0]])
+A = np.array([[theta_true[0], 1],[theta_true[1], 0]])
 A_true = np.array([[2, 1], [-0.5, 0]])  # 참값
 
 P0 = 0.1*np.eye(2)

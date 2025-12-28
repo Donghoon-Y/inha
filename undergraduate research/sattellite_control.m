@@ -42,7 +42,7 @@ t_kst = datetime(2025,12,19,0,0,0,'TimeZone','Asia/Seoul');
 t_utc0 = t_kst;
 t_utc0.TimeZone = 'UTC';
 
-%Two Body Dynamics -> 원궤도가 되었을 때 타원파라미터를 쉽게 정의하기 위해서 타원식으로 전개
+%Two Body Dynamics -> 타원궤도가 되었을 때 타원파라미터를 쉽게 정의하기 위해서 타원식으로 전개
 r0 = pqw2eci*r_pqw;
 v0 = pqw2eci*v_pqw;
 p = a*(1-e^2); 
@@ -51,7 +51,7 @@ T = 2*pi*sqrt(a^3/mu);
 n = 2*pi/T;
 h = sqrt(mu*p);
 x0 = [r0; v0];
-tspan = [0 3*T];
+tspan = [0 10*T];
 
 [t, x] = ode89(@(t, x) odeTwoBody(t, x, mu), tspan, x0);
 
@@ -83,11 +83,11 @@ surf(xe, ye, ze, ...
     'FaceAlpha',0.3, ...
     'DisplayName','Earth');
 
-plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3), ...
+plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3),'-o', ...
     'LineWidth',1.5, ...
     'DisplayName','ECI');
 
-plot3(r_ecef(:,1), r_ecef(:,2), r_ecef(:,3), ...
+plot3(r_ecef(:,1), r_ecef(:,2), r_ecef(:,3),'-o', ...
     'LineWidth',1.5, ...
     'DisplayName','ECEF');
 
@@ -99,11 +99,39 @@ legend('Location','best');
 view(3);
 rotate3d on;
 
-
 %Sun postion 
+jd = juliandate(t_utc) ;
+r_sun_eci = planetEphemeris(jd, 'Earth', 'sun');
 
+rho = r_sun_eci - r_eci; %위성 위치와 태양의 위치의 상대벡터
+rho_hat = rho ./vecnorm(rho,2,2);%태양이 너무 멀어서 단위벡터로 저장한다.
 
-%function
+%라이브러리가 아닌 근사식 함수를 통한 태양 위치 계산
+[r_sun_eci_approx, u_sun_eci_approx] = sun_eci_from_utc(t_utc);
+rho_approx = r_sun_eci_approx - r_eci;
+rho_approx_hat = rho_approx ./vecnorm(rho_approx,2,2);
+
+%추가적인 ground track 궤적 확인
+r_ecef_m = r_ecef*1e3;
+
+lla = ecef2lla(r_ecef_m);
+s_lat = lla(:,1);
+s_lon = lla(:,2);
+s_alt = lla(:,3);
+
+s_lon = wrapTo180(s_lon);
+
+figure
+hold on;
+plot(s_lon, s_lat, '-', 'LineWidth', 1.2)
+scatter(lon, lat)
+grid on
+xlabel('Longitude [deg]')
+ylabel('Latitude [deg]')
+title('Ground Track')
+hold off;
+
+%%
 function xdot = odeTwoBody(t,x,mu)
   
     % input
@@ -116,4 +144,32 @@ function xdot = odeTwoBody(t,x,mu)
     vdot = - mu / rmag^3 * r;
     xdot = [rdot ; vdot];
     
+end
+
+function [r_sun_eci, v_sun_eci] = sun_eci_from_utc(t_utc)
+
+    %Time
+    JD = juliandate(t_utc);
+    T = (JD-2451545.0)/36525.0;
+    
+    %Mean equation
+    M = 357.52911 + (35999.05029*T) - (0.0001537*T.^2);
+    L0 = 280.46646 + 36000.76983*T + 0.0003032*T.^2;
+    L0 = mod(L0,360);
+    M  = mod(M,360);
+    e = 0.0167086;
+    C = 2*e*sin(M) + 5/4*e^2*sin(2*M)+ 13/12*e^3*sin(3*M);
+    lam = L0 + C;
+    t_a = M + C;
+
+    R_AU = (1 - e.^2) ./ (1 + e.*cosd(t_a));
+
+    eps = 23.439291 - 0.0130042*T; 
+    x = cosd(lam);
+    y = cosd(eps).*sind(lam);
+    z = sind(eps).*sind(lam);
+
+    AU_km = 149597870.7;
+    r_sun_eci = [x(:), y(:), z(:)] .* (R_AU(:)*AU_km);
+    v_sun_eci = r_sun_eci ./ vecnorm(r_sun_eci,2,2);
 end

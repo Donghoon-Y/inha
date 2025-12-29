@@ -23,7 +23,7 @@ ze = Re * ze;
 
 %position 
 r_pqw = [a; 0; 0];                    % km
-v_pqw = [0; sqrt(mu/a); 0];           % km/s
+v_pqw = [0; sqrt(mu/a); 0];          % km/s
 
 %PQW to ECI rotation
 R_W = [cos(deg2rad(raan)) -sin(deg2rad(raan)) 0;
@@ -123,12 +123,13 @@ s_lon = wrapTo180(s_lon);
 
 figure
 hold on;
-plot(s_lon, s_lat, '-', 'LineWidth', 1.2)
-scatter(lon, lat)
+plot(s_lon, s_lat, '--', 'LineWidth', 1.2, 'Color',"b", DisplayName="Trajectory")
+scatter(lon, lat, DisplayName="Incheon")
 grid on
 xlabel('Longitude [deg]')
 ylabel('Latitude [deg]')
 title('Ground Track')
+legend();
 hold off;
 
 %%

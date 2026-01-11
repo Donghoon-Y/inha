@@ -72,14 +72,13 @@ tau_max = [inf; inf; inf];
 
 %simulate
 [t, x] = rungekutta4(@(t,x) odeTwoBody(t,x,mu), tspan, x0, dt);
- 
+[t_att, x_att] = q_rungekutta4(@(t,x) attitude_ode_pd(t, x, J, qd, wd,Kp, Kd, tau_max), tspan, x0_att, dt);
 
-[t_att, x_att] = q_rungekutta4(@(t,x) attitude_ode_pd(t, x, J, qd, wd,Kp, Kd, tau_max), ...
-                              tspan, x0_att, dt);
-
+%oribit results
 r_eci = x(1:3, :).';
 v_eci = x(4:6, :).';
 
+%attitude results
 q_hist = x_att(1:4,:).';
 w_hist = x_att(5:7,:).';
 
@@ -155,22 +154,6 @@ title('Ground Track')
 legend();
 hold off;
 
-
-
-% error angle (optional)
-qe_hist = zeros(length(t_att),4);
-ang_err = zeros(length(t_att),1);
-for k=1:length(t_att)
-    q = q_hist(k,:).';
-    q = q/norm(q);
-    qe = quatMultiply(qd, quatConj(q));
-    if qe(4)<0, qe=-qe; end
-    qe_hist(k,:) = qe.';
-    ang_err(k) = 2*acos(max(min(qe(4),1),-1)); % rad
-end
-
-figure; plot(t_att, ang_err*180/pi); grid on;
-xlabel('t [s]'); ylabel('Angle error [deg]');
 
 figure; plot(t_att, w_hist); grid on;
 xlabel('t [s]'); ylabel('\omega [rad/s]'); legend('p','q','r');

@@ -1,6 +1,8 @@
 clc; clear all;
-addpath('function');
 
+thisFile = mfilename('fullpath');
+thisDir  = fileparts(thisFile);
+addpath(genpath(thisDir)); 
 
 %Parameter
 mu = 398600;        % [km3/s2] Earth gravitational constant
@@ -53,8 +55,8 @@ T = 2*pi*sqrt(a^3/mu);
 n = 2*pi/T;
 h = sqrt(mu*p);
 x0 = [r0; v0];
-tspan = [0 T];
-dt = 5;
+tspan = [0 1*T];
+dt = 1;
 
 %rigid dynamic
 J  = diag([27.3, 48.2, 54.2]);
@@ -63,22 +65,24 @@ q0 = q0/norm(q0);
 w0 = deg2rad([1; -2; 0.5]);   % rad/s
 x0_att = [q0; w0];
 
-
+%Attitude control settings
+qd = [0; 0; 0; 1];   
+wd = [0;0;0];
+Kp = diag([0.05, 0.05, 0.05]);   
+Kd = diag([0.5,  0.5,  0.5 ]);   
+tau_max = [inf; inf; inf];    
 
 %simulate
 [t, x] = rungekutta4(@(t,x) odeTwoBody(t,x,mu), tspan, x0, dt);
-% ---- Attitude control settings ----
-qd = [0; 0; 0; 1];                % 목표 자세 (I->D)
-Kp = diag([0.05, 0.05, 0.05]);   
-Kd = diag([0.5,  0.5,  0.5 ]);   
-tau_max = [0.02; 0.02; 0.02];     % [N*m] (원하면, 없으면 Inf로)
+[t_att, x_att] = q_rungekutta4(@(t,x) attitude_ode_pd(t, x, J, qd, wd,Kp, Kd, tau_max), tspan, x0_att, dt);
 
-[t_att, x_att] = q_rungekutta4(@(t,x) attitude_ode_pd(t, x, J, qd, Kp, Kd, tau_max), ...
-                              tspan, x0_att, dt);
-
+%oribit results
 r_eci = x(1:3, :).';
 v_eci = x(4:6, :).';
 
+%attitude results
+q_hist = x_att(1:4,:).';
+w_hist = x_att(5:7,:).';
 
 %ECI to ECEF 
 r_ecef = zeros(size(r_eci));
@@ -152,24 +156,10 @@ title('Ground Track')
 legend();
 hold off;
 
-q_hist = x_att(1:4,:).';
-w_hist = x_att(5:7,:).';
+<<<<<<< HEAD:undergraduate research/sattellite_control.m
 
-% error angle (optional)
-qe_hist = zeros(length(t_att),4);
-ang_err = zeros(length(t_att),1);
-for k=1:length(t_att)
-    q = q_hist(k,:).';
-    q = q/norm(q);
-    qe = quatMultiply(qd, quatConj(q));
-    if qe(4)<0, qe=-qe; end
-    qe_hist(k,:) = qe.';
-    ang_err(k) = 2*acos(max(min(qe(4),1),-1)); % rad
-end
-
-figure; plot(t_att, ang_err*180/pi); grid on;
-xlabel('t [s]'); ylabel('Angle error [deg]');
-
+=======
+>>>>>>> 285561d (tidy):undergraduate research/src/main.m
 figure; plot(t_att, w_hist); grid on;
 xlabel('t [s]'); ylabel('\omega [rad/s]'); legend('p','q','r');
 

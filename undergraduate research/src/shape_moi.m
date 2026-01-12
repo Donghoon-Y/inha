@@ -1,5 +1,9 @@
 clc; clear; close all;
-addpath('function')
+
+thisFile = mfilename('fullpath');
+thisDir  = fileparts(thisFile);
+addpath(genpath(thisDir)); 
+
 
 
 T = [0; 0; 0];

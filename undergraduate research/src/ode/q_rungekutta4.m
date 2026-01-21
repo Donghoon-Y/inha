@@ -7,7 +7,8 @@ function [t_list, y] = q_rungekutta4(f, t_span, y0, h)
 
     y = zeros(length(y0), N);
     y(:,1) = y0;
-
+    
+    cnt = 0;
     for i = 1:N-1
         t  = t_list(i);
         yi = y(:,i);
@@ -22,5 +23,15 @@ function [t_list, y] = q_rungekutta4(f, t_span, y0, h)
         % quaternion normalization
         q = y(1:4, i+1);
         y(1:4, i+1) = q / norm(q);
+        if mod(i, 100) == 0 
+            fprintf('%d', i);
+            cnt = cnt +1 ;
+            if mod(cnt, 5) == 0
+               fprintf('\n');   
+            end
+            
+        end
     end
+    fprintf('\n');
+    disp("Complete rungekutta");
 end

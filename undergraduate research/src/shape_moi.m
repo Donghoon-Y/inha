@@ -5,7 +5,6 @@ thisDir  = fileparts(thisFile);
 addpath(genpath(thisDir)); 
 
 
-
 T = [0; 0; 0];
 
 J_disk = diag([56.0, 56.0, 64.0]);

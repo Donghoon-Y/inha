@@ -55,7 +55,7 @@ T = 2*pi*sqrt(a^3/mu);
 n = 2*pi/T;
 h = sqrt(mu*p);
 x0 = [r0; v0];
-tspan = [0 3*T];
+tspan = [0 1*T];
 dt = 1;
 
 %rigid dynamic
@@ -79,11 +79,15 @@ tau_max = [inf; inf; inf];
 %simulate
 fprintf("Simulation Start.......\n");
 [t, x] = rungekutta4(@(t,x) odeTwoBody(t,x,mu), tspan, x0, dt);
+[t_att, x_att] = q_rungekutta4(@(t,x) attitude_ode, tspan, x0_att, dt);
 
 %oribit results
 r_eci = x(1:3, :).';
 v_eci = x(4:6, :).';
 
+%attitude results
+q_hist = x_att(1:4,:).';
+w_hist = x_att(5:7,:).';
 
 %ECI to ECEF 
 r_ecef = zeros(size(r_eci));
@@ -121,6 +125,22 @@ jd = jd(:);
 rho_approx = r_sun_eci_approx - r_eci;
 rho_approx_hat = rho_approx ./vecnorm(rho_approx,2,2);
 
+%sun position ECI -> Body로 Rotaion 
+rho_approx_hat_body = zeros(size(rho_approx_hat));
+check = 0;
+for i=1:length(q_hist(:,1))
+    rho_approx_hat_body(i,:) = (dcm_q(q_hist(i,:))*rho_approx_hat(i,:).').';
+    if mod(i, 100) == 0 
+        fprintf('%d', i);
+        check  = check + 1;
+        if mod(check, 5) ==0 
+            fprintf("\n");
+        end
+    end
+end
+fprintf('\n');
+disp('Complete Sun Postion Rotation');
+
 %target
 z_b = [0;0;1];
 
@@ -129,8 +149,8 @@ fprintf("Simulation Start.......\n");
 [t_att_sun, x_att_sun] = q_rungekutta4(@(tt,xx) attitude_ode_sun_pd(tt, xx, J, Kp, Kd, tau_max, rho_approx_hat, z_b),tspan, x0_att, dt);
 
 %Sunpointing results
-q_sun = x_att_sun(1:4,:).';
-w_sun = x_att_sun(5:7,:).';
+q_sun = x_att_sun(1:4,:);
+w_sun = x_att_sun(5:7,:);
 
 %Sunpoint Analysis
 N = length(t_att_sun);
@@ -139,22 +159,21 @@ control_torque = zeros(N,3);
 dot_product_hist = zeros(N,1);
 
 for i = 1:N 
-    q_now = q_sun(i, :).'; 
-    w_now = w_sun(i, :).';
+    q_now = q_sun(i,:);
     k = round(t_att_sun(i)) + 1;
 
     if k > length(rho_approx_hat)
         k = length(rho_approx_hat); 
     end
    
-    s_i = rho_approx_hat(k, :).';
+    s_i = rho_approx_hat(k, :);
 
     C_bi = dcm_q(q_now);
     s_b = C_bi*s_i;
     s_b = s_b/norm(s_b);
 
     dot_sz = dot(s_b, z_b);
-    dot_sz = min(max(dot_sz,-1),1);
+    dot_sz = min(mmax(dot_sz,-1),1);
 
     dot_product_hist(i) = dot_sz;
     pointing_err_deg(i) = acosd(dot_sz);
@@ -233,13 +252,13 @@ hold off;
 figure('Name', 'Control Performance', 'Color', 'w');
 % (1) Pointing Error (각도 오차)
 subplot(2,1,1);
-plot(t_att_sun, pointing_err_deg, 'LineWidth', 1.5, 'Color', 'k');
+plot(t_att_sun, point_err_deg, 'LineWidth', 1.5, 'Color', 'k');
 grid on;
 ylabel('Pointing Error [deg]', 'FontSize', 12);
 title('Sun Pointing Accuracy', 'FontSize', 14);
 xlim([0 t_att_sun(end)]);
-ylim([-2, 10]);
-yline(0, '--r', 'Target Accuracy (0 deg)'); 
+% 목표 오차(예: 1도) 라인 그리기
+yline(1, '--r', 'Target Accuracy (1 deg)'); 
 
 % (2) Angular Velocity (안정성)
 subplot(2,1,2);
@@ -252,24 +271,4 @@ legend('\omega_x', '\omega_y', '\omega_z');
 xlim([0 t_att_sun(end)]);
 
 
-%Control Torque, Quaternion 
-figure('Name', 'Actuator & State', 'Color', 'w');
 
-% (1) Control Torque
-subplot(2,1,1);
-plot(t_att_sun, control_torque*1000, 'LineWidth', 1.2); % Nm -> mNm 변환 추천
-grid on;
-ylabel('Torque [mNm]', 'FontSize', 12);
-title('Required Control Torque', 'FontSize', 14);
-legend('T_x', 'T_y', 'T_z');
-xlim([0 t_att_sun(end)]);
-
-% (2) Quaternion History
-subplot(2,1,2);
-plot(t_att_sun, q_sun, 'LineWidth', 1.2);
-grid on;
-xlabel('Time [sec]', 'FontSize', 12);
-ylabel('Quaternion [-]', 'FontSize', 12);
-title('Attitude History (Quaternion)');
-legend('q_1', 'q_2', 'q_3', 'q_4 (scalar)');
-xlim([0 t_att_sun(end)]);

@@ -19,8 +19,8 @@ function [t_list, y] = rungekutta4(f, t_span, y0, h)
         k4 = f(t + h,     yi + h*k3);
 
         y(:,i+1) = yi + (h/6)*(k1 + 2*k2 + 2*k3 + k4);
-        if mod(i, 100) == 0 
-            fprintf('%d', i);
+        if mod(i, 500) == 0 
+            fprintf('%d ', i);
             cnt = cnt +1 ;
             if mod(cnt, 5) == 0
                fprintf('\n');   

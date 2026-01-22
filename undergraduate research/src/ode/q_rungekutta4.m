@@ -23,8 +23,8 @@ function [t_list, y] = q_rungekutta4(f, t_span, y0, h)
         % quaternion normalization
         q = y(1:4, i+1);
         y(1:4, i+1) = q / norm(q);
-        if mod(i, 100) == 0 
-            fprintf('%d', i);
+        if mod(i, 500) == 0 
+            fprintf('%d ', i);
             cnt = cnt +1 ;
             if mod(cnt, 5) == 0
                fprintf('\n');   

@@ -1,35 +1,39 @@
-clc; clear all;
+clc; clear;
+
+%쿼터니언은 JPL Notation 사용
 
 thisFile = mfilename('fullpath');
 thisDir  = fileparts(thisFile);
 addpath(genpath(thisDir)); 
 
-%Parameter
+% Parameter Setting
 mu = 398600;        % [km3/s2] Earth gravitational constant
 R = 6371;           % [km] Earth radius
-a = 600+R;          % [km] semi-major axis (SMA)(circle orbit)
+a = 600+R;          % [km] semi-major axis
 e = 0;              % [-] eccentricity
 inc = 97.8;         % [deg] inclination
 raan = 0;           % [deg] 승교점이각
 aop = 0;            % [deg] 근점이각
-lat = 37.2302;      % [deg] 위도(항공우주산학융합원)
+lat = 37.2302;      % [deg] 위도 (항공우주산학융합원)
 lon = 126.3925;     % [deg] 경도
-alt = 0;           % [m] 해발고도
-angle = 10;         % [deg] 최소교신각도
+alt = 0;            % [m] 해발고도
+angle = 10;         % [deg] 최소교신각도 (Elevation Mask)
 
-% Earth sphere
+% Earth sphere for plotting
 [xe, ye, ze] = sphere(80);  
 Re = R;                      
+xe = Re * xe; ye = Re * ye; ze = Re * ze;
 
-xe = Re * xe;
-ye = Re * ye;
-ze = Re * ze;
+% Initial Position/Velocity (PQW)
+r_pqw = [a; 0; 0];                   
+v_pqw = [0; sqrt(mu/a); 0];         
 
-%position 
-r_pqw = [a; 0; 0];                    % km
-v_pqw = [0; sqrt(mu/a); 0];          % km/s
+% Ground Station (ECEF) [km]
+x_g_ecef = R*[cos(deg2rad(lat))*cos(deg2rad(lon));
+              cos(deg2rad(lat))*sin(deg2rad(lon));
+              sin(deg2rad(lat))];
 
-%PQW to ECI rotation
+% PQW to ECI rotation
 R_W = [cos(deg2rad(raan)) -sin(deg2rad(raan)) 0;
        sin(deg2rad(raan)) cos(deg2rad(raan)) 0;
        0 0 1];
@@ -41,234 +45,291 @@ R_w = [cos(deg2rad(aop)) -sin(deg2rad(aop)) 0;
        0 0 1];
 pqw2eci = R_W*R_i*R_w;
 
-%Time 
-t_kst = datetime(2023,12,19,0,0,0,'TimeZone','Asia/Seoul');
+% Time Settings
+t_kst = datetime(2025,12,19,0,0,0,'TimeZone','Asia/Seoul');
 t_utc0 = t_kst;
 t_utc0.TimeZone = 'UTC';
 
-%Two Body Dynamics -> 타원궤도가 되었을 때 타원파라미터를 쉽게 정의하기 위해서 타원식으로 전개
+
+% Orbit Simulation (Two Body)
 r0 = pqw2eci*r_pqw;
 v0 = pqw2eci*v_pqw;
-p = a*(1-e^2); 
-b = a*sqrt(1-e^2);
-T = 2*pi*sqrt(a^3/mu);
-n = 2*pi/T;
-h = sqrt(mu*p);
+T_period = 2*pi*sqrt(a^3/mu);
 x0 = [r0; v0];
-tspan = [0 1*T];
-dt = 1;
+tspan = [0 4*T_period]; 
+dt = 0.1;
 
-%rigid dynamic
-J  = diag([0.011, 0.009, 0.006]);
-q0 = [0.2; -0.1; 0.3; 0.92]; 
+fprintf("Orbit Simulation Start.......\n");
+[t, x] = rungekutta4(@(t,x) odeTwoBody(t,x,mu), tspan, x0, dt);
+
+% Orbit results
+r_eci = x(1:3, :).'; % [km] N x 3
+v_eci = x(4:6, :).'; % [km/s]
+
+% ECI to ECEF Conversion (for Ground Track)
+r_ecef = zeros(size(r_eci));
+v_ecef = zeros(size(v_eci));
+t_utc = t_utc0 + seconds(t);
+cnt = 0;
+
+fprintf("Converting ECI to ECEF (Original).......\n");
+for i = 1:length(t)
+    utc_vec = datevec(t_utc(i));
+    mjd = mjuliandate(utc_vec);
+    %pm = polarMotion(mjd);
+    [re_m, ve_m] = eci2ecef(utc_vec, r_eci(i, :)*1000, v_eci(i, :)*1000);
+    
+    r_ecef(i,:) = re_m/1000;
+    v_ecef(i,:) = ve_m/1000;
+   
+    if mod(i, 500) == 0  % 출력 빈도 조절
+        fprintf('%d ', i);
+        cnt = cnt +1 ;
+        if mod(cnt, 10) == 0
+            fprintf('\n');   
+        end
+    end
+end
+fprintf('\n');
+disp("Orbit Calculation Complete.");
+
+%%
+% Sun Position Calculation (N x 3)
+[r_sun_eci_approx, u_sun_eci_approx] = sun_eci_from_utc(t_utc);
+rho_approx = r_sun_eci_approx - r_eci;
+rho_approx_hat = rho_approx ./ vecnorm(rho_approx, 2, 2);
+
+% Rigid Body Parameters
+J = diag([0.070, 0.071, 0.007]);
+q0 = [0.2; -0.1; 0.3; 0.92];  % Scalar Last, 디텀블링 고려
 q0 = q0/norm(q0);
 w0 = deg2rad([1; -2; 0.5]);   % rad/s
 x0_att = [q0; w0];
 
-%Attitude control settings
-qd = [0; 0; 0; 1];   
-wd = [0;0;0];
-Ts = 60;
-zeta = 1/sqrt(2);
+% Controller Gains
+Ts = 40; % 2%오차에 도달하는 시간 (100)
+zeta = 1/sqrt(2); %오버슛 적게 하기 위해서 1/sqrt(2)
 wn = 4/(Ts*zeta);
-
 Kp = diag(diag(J) * wn^2);
 Kd = diag(2*zeta*diag(J)*wn);  
-tau_max = [inf; inf; inf];    
+% tau_max = [0.1 * 1e-3; 0.1 * 1e-3; 0.1 * 1e-3];    
+tau_max = [inf;inf;inf];
 
-%simulate
-fprintf("Simulation Start.......\n");
-[t, x] = rungekutta4(@(t,x) odeTwoBody(t,x,mu), tspan, x0, dt);
-[t_att, x_att] = q_rungekutta4(@(t,x) attitude_ode, tspan, x0_att, dt);
+% Simulate (Switching ODE 호출)
+fprintf("Attitude Simulation Start (Switching Mode).......\n");
 
-%oribit results
-r_eci = x(1:3, :).';
-v_eci = x(4:6, :).';
+[t_att, x_att] = q_rungekutta4(@(tt,xx) attitude_mode_switch(tt, xx, J, Kp, Kd, tau_max, r_eci, v_eci, rho_approx_hat, x_g_ecef*1000, angle), tspan, x0_att, dt);
 
-%attitude results
-q_hist = x_att(1:4,:).';
-w_hist = x_att(5:7,:).';
+q_hist = x_att(1:4, :).'; 
+w_hist = x_att(5:7, :).';
 
-%ECI to ECEF 
-r_ecef = zeros(size(r_eci));
-v_ecef = zeros(size(v_eci));
+t_att_utc = t_utc0 + seconds(t_att);
 
-t_utc = t_utc0 + seconds(t);
-
-cnt = 0;
-for i = 1:length(t)
-    utc_vec = datevec(t_utc(i));
-    mjd = mjuliandate(utc_vec);
-    pm = polarMotion(mjd);
-    [re_m, ve_m] = eci2ecef(utc_vec, r_eci(i, :)*1000, v_eci(i, :)*1000, 'pm', pm);
-    r_ecef(i,:) = re_m/1000;
-    v_ecef(i,:) = ve_m/1000;
-   
-    if mod(i, 100) == 0 
-        fprintf('%d', i);
-        cnt = cnt +1 ;
-        if mod(cnt, 5) == 0
-            fprintf('\n');   
-        end
-        
-    end
-end
-fprintf('\n');
-disp("complete convert ECEF");
-
-%Sun postion 
-jd = juliandate(t_utc);
-jd = jd(:);
-
-%라이브러리가 아닌 근사식 함수를 통한 태양 위치 계산
-[r_sun_eci_approx, u_sun_eci_approx] = sun_eci_from_utc(t_utc);
-rho_approx = r_sun_eci_approx - r_eci;
-rho_approx_hat = rho_approx ./vecnorm(rho_approx,2,2);
-
-%sun position ECI -> Body로 Rotaion 
-rho_approx_hat_body = zeros(size(rho_approx_hat));
-check = 0;
-for i=1:length(q_hist(:,1))
-    rho_approx_hat_body(i,:) = (dcm_q(q_hist(i,:))*rho_approx_hat(i,:).').';
-    if mod(i, 100) == 0 
-        fprintf('%d', i);
-        check  = check + 1;
-        if mod(check, 5) ==0 
-            fprintf("\n");
-        end
-    end
-end
-fprintf('\n');
-disp('Complete Sun Postion Rotation');
-
-%target
-z_b = [0;0;1];
-
-%sunpointing simulate
-fprintf("Simulation Start.......\n");
-[t_att_sun, x_att_sun] = q_rungekutta4(@(tt,xx) attitude_ode_sun_pd(tt, xx, J, Kp, Kd, tau_max, rho_approx_hat, z_b),tspan, x0_att, dt);
-
-%Sunpointing results
-q_sun = x_att_sun(1:4,:);
-w_sun = x_att_sun(5:7,:);
-
-%Sunpoint Analysis
-N = length(t_att_sun);
+N = length(t_att);
 pointing_err_deg = zeros(N,1);
 control_torque = zeros(N,3);
-dot_product_hist = zeros(N,1);
+mode_hist = zeros(N,1); % 0: Sun, 1: Ground
 
+x_b = [1; 0; 0]; % Body Z-axis (Antenna)
+We = 7.292115e-5; %지구자전 각속도
+
+fprintf("Analyzing Results.......\n");
 for i = 1:N 
-    q_now = q_sun(i,:);
-    k = round(t_att_sun(i)) + 1;
-
-    if k > length(rho_approx_hat)
-        k = length(rho_approx_hat); 
+    % Current State
+    t_now = t_att(i);
+    q_now = q_hist(i, :).'; 
+    w_now = w_hist(i, :).';
+    
+    k = round(t_now) + 1;
+    if k > size(r_eci, 1), k = size(r_eci, 1); end
+    
+    % Geometry Reconstruction (Simulate what the ODE did)
+    r_sat_m = r_eci(k, :).' * 1000;
+    
+    % Ground Station Position in ECI
+    theta = We * t_now;
+    R_ecef2eci = [cos(theta) -sin(theta) 0; sin(theta) cos(theta) 0; 0 0 1];
+    r_gs_m = R_ecef2eci * (x_g_ecef * 1000);
+    
+    % Visibility Check
+    r_rel_m = r_gs_m - r_sat_m;
+    u_zenith = r_gs_m / norm(r_gs_m);
+    u_gs2sat = -r_rel_m / norm(r_rel_m);
+    elv_deg = rad2deg(asin(dot(u_gs2sat, u_zenith)));
+    
+    % Mode Determination & Target Vector
+    if elv_deg >= angle
+        % [Mode: GROUND Station]
+        mode_hist(i) = 1; 
+        target_vec_eci = r_rel_m / norm(r_rel_m); 
+        % Control Torque Calculation (Approximate for plotting)
+        % 시각화용으로 간단히 에러에 비례한다고 가정하거나 0으로 둠
+    else
+        % [Mode: Sun]
+        mode_hist(i) = 0;
+        target_vec_eci = rho_approx_hat(k, :).'; % Look at Sun
     end
-   
-    s_i = rho_approx_hat(k, :);
-
-    C_bi = dcm_q(q_now);
-    s_b = C_bi*s_i;
-    s_b = s_b/norm(s_b);
-
-    dot_sz = dot(s_b, z_b);
-    dot_sz = min(mmax(dot_sz,-1),1);
-
-    dot_product_hist(i) = dot_sz;
-    pointing_err_deg(i) = acosd(dot_sz);
-
-    cross_sz = cross(s_b, z_b);
-
-    if norm(cross_sz) < 1e-6 
-        q_err_scalar = 1;
-        q_err_vec = [0; 0; 0];
-    else 
-        cross_sz = cross_sz/norm(cross_sz);
-        q_err_vec = cross_sz*sind(pointing_err_deg(i)/2);
-        q_err_scalar = cosd(pointing_err_deg(i)/2);
-    end
-
-    sign_q4 = q_err_scalar;
-
-    if sign_q4 == 0, sign_q4 = 1; end
-
-    T_req = -Kp * sign_q4 * q_err_vec - Kd * w_now;
-    T_lim = min(T_req, tau_max);
-    control_torque(i, :) = T_lim';
+    
+    % Pointing Error Calculation
+    % (Target Vector를 Body Frame으로 변환하여 Z축과 비교)
+    C_bi = dcm_q(q_now); 
+    target_vec_body = C_bi * target_vec_eci;
+    target_vec_body = target_vec_body / norm(target_vec_body);
+    
+    dot_val = dot(target_vec_body, x_b);
+    dot_val = max(min(dot_val, 1), -1);
+    pointing_err_deg(i) = acosd(dot_val);
 end
 
-%% Plot
-%ECI, ECEF Plot
-figure; hold on;
+%%Plot
+% (1) 3D Orbit
+figure('Name','3D Orbit','Color','w'); hold on;
+surf(xe, ye, ze, 'FaceColor',[0.6 0.8 1], 'EdgeColor','none', 'FaceAlpha',0.3, 'DisplayName','Earth');
+plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3),'-b', 'LineWidth',1, 'DisplayName','Orbit');
+% 지상국 위치 표시 
+plot3(x_g_ecef(1), x_g_ecef(2), x_g_ecef(3), 'rp', 'MarkerSize',10, 'MarkerFaceColor','r', 'DisplayName','GS (t=0)');
+axis equal; grid on; xlabel('X [km]'); ylabel('Y [km]'); zlabel('Z [km]');
+legend; view(3); title('Satellite Trajectory (ECI)');
 
-surf(xe, ye, ze, ...
-    'FaceColor',[0.6 0.8 1], ...
-    'EdgeColor','none', ...
-    'FaceAlpha',0.3, ...
-    'DisplayName','Earth');
-
-plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3),'-o', ...
-    'LineWidth',1.5, ...
-    'DisplayName','ECI');
-
-plot3(r_ecef(:,1), r_ecef(:,2), r_ecef(:,3),'-o', ...
-    'LineWidth',1.5, ...
-    'DisplayName','ECEF');
-
-axis equal; grid on;
-xlabel('X [km]'); ylabel('Y [km]'); zlabel('Z [km]');
-title('Satellite trajectory');
-legend('Location','best');
-
-view(3);
-rotate3d on;
-
-
-
-%ground track 궤적 확인
+% (2) Ground Track
 r_ecef_m = r_ecef*1e3;
-
 lla = ecef2lla(r_ecef_m);
-s_lat = lla(:,1);
-s_lon = lla(:,2);
-s_alt = lla(:,3);
-
+s_lat = lla(:,1); s_lon = lla(:,2);
 s_lon = wrapTo180(s_lon);
+figure('Name','Ground Track','Color','w'); hold on;
+plot(s_lon, s_lat, '.', 'MarkerSize', 2, 'Color',"b", 'DisplayName',"Trajectory");
+scatter(lon, lat, 50, 'r', 'filled', 'DisplayName',"Incheon GS");
+grid on; xlabel('Longitude [deg]'); ylabel('Latitude [deg]');
+title('Ground Track'); legend; xlim([-180 180]); ylim([-90 90]);
 
-figure
-hold on;
-plot(s_lon, s_lat, '--', 'LineWidth', 1.2, 'Color',"b", DisplayName="Trajectory")
-scatter(lon, lat, DisplayName="Incheon")
-grid on
-xlabel('Longitude [deg]')
-ylabel('Latitude [deg]')
-title('Ground Track')
-legend();
-hold off;
-
-
-%Sunpointing
+% (3) Mode & Pointing Error 
 figure('Name', 'Control Performance', 'Color', 'w');
-% (1) Pointing Error (각도 오차)
-subplot(2,1,1);
-plot(t_att_sun, point_err_deg, 'LineWidth', 1.5, 'Color', 'k');
-grid on;
-ylabel('Pointing Error [deg]', 'FontSize', 12);
-title('Sun Pointing Accuracy', 'FontSize', 14);
-xlim([0 t_att_sun(end)]);
-% 목표 오차(예: 1도) 라인 그리기
-yline(1, '--r', 'Target Accuracy (1 deg)'); 
 
-% (2) Angular Velocity (안정성)
-subplot(2,1,2);
-plot(t_att_sun, rad2deg(w_sun), 'LineWidth', 1.2);
-grid on;
-xlabel('Time [sec]', 'FontSize', 12);
-ylabel('Body Rate [deg/s]', 'FontSize', 12);
-title('Angular Velocity Stability');
+% Subplot 1: Mode History
+subplot(3,1,1);
+area(t_att_utc, mode_hist, 'FaceColor', [0.2 0.8 0.2], 'FaceAlpha', 0.3);
+ylim([-0.1 1.1]);
+yticks([0 1]); yticklabels({'Sun', 'Ground'});
+grid on; ylabel('Mode');
+title('Attitude Control Mode Switching');
+
+% Subplot 2: Pointing Error
+subplot(3,1,2);
+plot(t_att_utc, pointing_err_deg, 'LineWidth', 1.2, 'Color', 'k');
+grid on; ylabel('Error [deg]');
+title('Pointing Error (Relative to Active Target)');
+yline(0, '--r'); 
+ylim([0, max(10, max(pointing_err_deg)*1.1)]); 
+
+% Subplot 3: Angular Velocity
+subplot(3,1,3);
+plot(t_att_utc, rad2deg(w_hist), 'LineWidth', 1);
+grid on; ylabel('Ang Vel [deg/s]'); xlabel('Time [sec]');
 legend('\omega_x', '\omega_y', '\omega_z');
-xlim([0 t_att_sun(end)]);
+title('Body Angular Velocity');
+
+% (4) Quaternion History
+figure('Name', 'Quaternion', 'Color', 'w');
+plot(t_att_utc, q_hist, 'LineWidth', 1.2);
+grid on; xlabel('Time [sec]'); ylabel('Quaternion');
+legend('q_x', 'q_y', 'q_z', 'q_w (Scalar)');
+title('Quaternion History');
+
+%%
+fprintf('\nStarting Real-Time Animation...\n');
+
+play_speed = 5; 
+step = play_speed; 
+
+f_anim = figure('Name', 'Real-Time Satellite Monitor', 'Color', 'w', 'Position', [100, 100, 1200, 900]);
+axis equal; grid on; hold on;
+xlabel('X [km]'); ylabel('Y [km]'); zlabel('Z [km]');
+set(gca, 'Color', 'w', 'XColor', 'k', 'YColor', 'k', 'ZColor', 'k', 'FontSize', 12);
+view(3);
+xlim([-a-3000, a+3000]); ylim([-a-3000, a+3000]); zlim([-a-3000, a+3000]);
 
 
+surf(xe, ye, ze, 'FaceColor', [0.1, 0.3, 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
+plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3), 'Color', [0.4 0.4 0.4], 'LineWidth', 0.5);
+
+h_sat = plot3(0,0,0, 'co', 'MarkerSize', 10, 'MarkerFaceColor', 'c', 'DisplayName', 'Satellite');
+h_gs = plot3(0,0,0, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'DisplayName', 'Incheon GS');
+h_link = plot3([0 0], [0 0], [0 0], 'y-', 'LineWidth', 3, 'DisplayName', 'Comm Link');
+h_sun = quiver3(0,0,0, 0,0,0, 0, 'Color', [1 0.6 0], 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Sun Vector');
+h_z_axis = quiver3(0,0,0, 0,0,0, 0, 'Color', 'c', 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Body x-axis');
+h_text = title('Initializing...', 'Color', 'k', 'FontSize', 15, 'FontWeight', 'bold');
+
+legend([h_sat, h_gs, h_link, h_sun, h_z_axis], 'Location', 'northeast');
+
+% 4. 애니메이션 루프
+N_total = length(t_att);
+vec_len = 4000; 
+
+fprintf('Animation Playing... \n');
+
+for k = 1 : step : N_total
+    % (1) 현재 인덱스 및 시간
+    idx = round(t_att(k)) + 1;
+    if idx > size(r_eci,1), idx = size(r_eci,1); end
+    curr_time = t_att(k);
+    curr_time_utc = t_att_utc(k);
+    
+    % (2) 위치 업데이트
+    % 위성 (ECI)
+    sat_pos = r_eci(idx, :);
+    set(h_sat, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3));
+    
+    % 지상국 (ECI 회전 반영)
+    theta = We * curr_time;
+    R_rot = [cos(theta) -sin(theta) 0; sin(theta) cos(theta) 0; 0 0 1];
+    gs_pos = (R_rot * x_g_ecef * 1000 / 1000)'; % [km]
+    set(h_gs, 'XData', gs_pos(1), 'YData', gs_pos(2), 'ZData', gs_pos(3));
+    
+    % (3) 자세 및 벡터 업데이트
+    q_curr = q_hist(k, :);
+    % 사용자 정의 함수 dcm_q 사용 (Inertial -> Body 가정 시 Transpose 주의)
+    C_bi = dcm_q(q_curr); 
+    
+    % Body Z축을 ECI로 변환 (C_bi' * [0;0;1])
+    z_body = [1;0;0];
+    z_eci = (C_bi' * z_body)';
+    
+    % 태양 벡터
+    sun_vec = rho_approx_hat(idx, :);
+    
+    % 화살표 그리기
+    set(h_z_axis, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
+                  'UData', z_eci(1)*vec_len, 'VData', z_eci(2)*vec_len, 'WData', z_eci(3)*vec_len);
+              
+    set(h_sun, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
+               'UData', sun_vec(1)*vec_len, 'VData', sun_vec(2)*vec_len, 'WData', sun_vec(3)*vec_len);
+    
+    % (4) 모드별 시각화 (Ground Tracking vs Sun Pointing)
+    time_str = datestr(curr_time_utc, 'yyyy-mm-dd HH:MM:SS');
+    if mode_hist(k) == 1 % Ground Mode
+        % 링크 연결 (노란선 ON)
+        set(h_link, 'XData', [sat_pos(1) gs_pos(1)], ...
+                    'YData', [sat_pos(2) gs_pos(2)], ...
+                    'ZData', [sat_pos(3) gs_pos(3)], 'Visible', 'on');
+        
+        % 태양 화살표 숨김 (집중)
+        set(h_sun, 'Visible', 'on');
+        
+        status_msg = sprintf('[%s] UTC | Mode: GROUND TRACKING', time_str);
+        set(h_text, 'String', status_msg, 'Color', 'g');
+        
+    else % Sun Mode
+        % 링크 끊김 (노란선 OFF)
+        set(h_link, 'Visible', 'off');
+        
+        % 태양 화살표 보이기
+        set(h_sun, 'Visible', 'on');
+        
+        status_msg = sprintf('[%s] UTC | Mode: SUN POINTING', time_str);
+        set(h_text, 'String', status_msg, 'Color', 'k');
+    end
+    
+    drawnow; 
+end
+fprintf('Animation Finished.\n');
 

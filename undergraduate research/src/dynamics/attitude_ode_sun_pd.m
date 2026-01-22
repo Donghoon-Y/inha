@@ -1,4 +1,4 @@
-function dx = attitude_ode_sun_pd(t, x, J, Kp, Kd, tau_max, sun_hat_eci_hist, z_b)
+function dx = attitude_ode_sun_pd(t, x, J, Kp, Kd, tau_max, sun_hat_eci_hist, z_b, dt)
 
     q = x(1:4);   
     w = x(5:7);     

@@ -107,7 +107,7 @@ w0 = deg2rad([1; -2; 0.5]);   % rad/s
 x0_att = [q0; w0];
 
 % Controller Gains
-Ts = 10; % 2%오차에 도달하는 시간 (10)
+Ts = 30; % 2%오차에 도달하는 시간 (10)
 zeta = 1/sqrt(2); %오버슛 적게 하기 위해서 1/sqrt(2)
 wn = 4/(Ts*zeta);
 Kp = diag(diag(J) * wn^2);
@@ -238,7 +238,7 @@ title('Quaternion History');
 %%
 fprintf('\nStarting Real-Time Animation...\n');
 
-play_speed = 250; 
+play_speed = 50; 
 step = play_speed; 
 
 f_anim = figure('Name', 'Real-Time Satellite Monitor', 'Color', 'w', 'Position', [100, 100, 1200, 900]);

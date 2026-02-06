@@ -46,7 +46,7 @@ R_w = [cos(deg2rad(aop)) -sin(deg2rad(aop)) 0;
 pqw2eci = R_W*R_i*R_w;
 
 % Time Settings
-t_kst = datetime(2025,12,19,0,0,0,'TimeZone','Asia/Seoul');
+t_kst = datetime(2023,12,19,0,0,0,'TimeZone','Asia/Seoul');
 t_utc0 = t_kst;
 t_utc0.TimeZone = 'UTC';
 
@@ -76,8 +76,8 @@ fprintf("Converting ECI to ECEF (Original).......\n");
 for i = 1:length(t)
     utc_vec = datevec(t_utc(i));
     mjd = mjuliandate(utc_vec);
-    %pm = polarMotion(mjd);
-    [re_m, ve_m] = eci2ecef(utc_vec, r_eci(i, :)*1000, v_eci(i, :)*1000);
+    pm = polarMotion(mjd);
+    [re_m, ve_m] = eci2ecef(utc_vec, r_eci(i, :)*1000, v_eci(i, :)*1000,'pm', pm);
     
     r_ecef(i,:) = re_m/1000;
     v_ecef(i,:) = ve_m/1000;
@@ -107,7 +107,7 @@ w0 = deg2rad([1; -2; 0.5]);   % rad/s
 x0_att = [q0; w0];
 
 % Controller Gains
-Ts = 30; % 2%오차에 도달하는 시간 (10)
+Ts = 40; % 2%오차에 도달하는 시간 (10)
 zeta = 1/sqrt(2); %오버슛 적게 하기 위해서 1/sqrt(2)
 wn = 4/(Ts*zeta);
 Kp = diag(diag(J) * wn^2);
@@ -181,6 +181,7 @@ for i = 1:N
     pointing_err_deg(i) = acosd(dot_val);
 end
 
+%%
 %%Plot
 % (1) 3D Orbit
 figure('Name','3D Orbit','Color','w'); hold on;
@@ -223,22 +224,66 @@ ylim([0, max(10, max(pointing_err_deg)*1.1)]);
 
 % Subplot 3: Angular Velocity
 subplot(3,1,3);
-plot(t_att_utc, rad2deg(w_hist), 'LineWidth', 1);
-grid on; ylabel('Ang Vel [deg/s]'); xlabel('Time [sec]');
-legend('\omega_x', '\omega_y', '\omega_z');
-title('Body Angular Velocity');
+hold on;
 
+% 1. 먼저 실제 데이터 그래프 그리기
+plot(t_att_utc, rad2deg(w_hist), 'LineWidth', 1);
+
+% 2. 강조할 구간 설정
+t_detumble_end = t_att_utc(1) + seconds(Ts * 3); % 종료 시점 계산
+y_lims = ylim; % 현재 그래프의 y축 위아래 끝값 가져오기
+
+% 3. patch로 사각형 그리기 (시계 방향 또는 반시계 방향으로 꼭짓점 지정)
+% x좌표: 시작 -> 끝 -> 끝 -> 시작
+% y좌표: 바닥 -> 바닥 -> 천장 -> 천장
+x_patch = [t_att_utc(1), t_detumble_end, t_detumble_end, t_att_utc(1)];
+y_patch = [y_lims(1), y_lims(1), y_lims(2), y_lims(2)];
+
+p = patch(x_patch, y_patch, 'y', 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+uistack(p, 'bottom'); % 색칠된 영역을 그래프 뒤로 보내기
+
+grid on; 
+ylabel('Ang Vel [deg/s]'); 
+xlabel('Time [sec]');
+legend('Detumbling Phase','\omega_x', '\omega_y', '\omega_z' );
+title('Body Angular Velocity');
+hold off;
 % (4) Quaternion History
 figure('Name', 'Quaternion', 'Color', 'w');
 plot(t_att_utc, q_hist, 'LineWidth', 1.2);
 grid on; xlabel('Time [sec]'); ylabel('Quaternion');
 legend('q_x', 'q_y', 'q_z', 'q_w (Scalar)');
 title('Quaternion History');
+%%
+figure('Name', 'Initial Detumbling Validation', 'Color', 'w');
+
+% 1. 각속도 수렴 확인
+subplot(2,1,1);
+plot(t_att_utc, rad2deg(w_hist), 'LineWidth', 1.5); hold on;
+% 설계된 Ts 지점에 가이드라인 표시
+xline(t_start + seconds(Ts), '--r', ['Target Ts (', num2str(Ts), 's)'], 'LineWidth', 1.2);
+grid on; 
+ylabel('Ang Vel [deg/s]');
+title('Initial Detumbling: Angular Velocity Convergence');
+xlim([t_start, t_start + t_detumble_end]);
+legend('\omega_x', '\omega_y', '\omega_z');
+
+% 2. 포인팅 오차 수렴 확인 (초기 Sun-Pointing 모드일 것임)
+subplot(2,1,2);
+plot(t_att_utc, pointing_err_deg, 'k', 'LineWidth', 1.5); hold on;
+xline(t_start + seconds(Ts), '--r', 'Target Ts');
+% 초기 오차의 2% 라인 표시
+yline(pointing_err_deg(1)*0.02, ':b', '2% Error Threshold');
+grid on;
+ylabel('Pointing Error [deg]');
+xlabel('Time [UTC]');
+title('Initial Orientation: Pointing Error Convergence');
+xlim([t_start, t_start + t_detumble_end]);
 
 %%
 fprintf('\nStarting Real-Time Animation...\n');
 
-play_speed = 50; 
+play_speed = 1000; 
 step = play_speed; 
 
 f_anim = figure('Name', 'Real-Time Satellite Monitor', 'Color', 'w', 'Position', [100, 100, 1200, 900]);
@@ -339,7 +384,7 @@ fprintf('Animation Finished.\n');
 idx_ground = find(mode_hist == 1);
 
 if isempty(idx_ground)
-    fprintf('\n[Result] ⚠️ 지상국과 접속한 구간이 없습니다. (Check Angle or Time)\n');
+    fprintf('\n[Result] 지상국과 접속한 구간이 없습니다. (Check Angle or Time)\n');
 else
     % 2. 해당 구간의 오차값 추출
     ground_errors = pointing_err_deg(idx_ground);
@@ -381,4 +426,60 @@ else
         ylim([0, max(ground_errors)*1.1]); 
     end
 end
-% =========================================================================
+%%
+startTime = t_att_utc(1);
+stopTime = t_att_utc(end);
+
+sampleTime = 1;
+
+
+sc = satelliteScenario(startTime, stopTime, sampleTime);
+
+step = max(1, round(sampleTime/dt));
+idx = 1:step:length(t_att_utc);
+
+pos_m = r_eci*1000;
+vel_ms = v_eci*1000;
+
+q_scalarFirst = [q_hist(:,4), q_hist(:,1:3)];
+q_ds = q_scalarFirst(idx,:);
+
+pos_m_ds = pos_m(idx, :);
+vel_ms_ds = vel_ms(idx, :);
+t_utc_ds = t_att_utc(idx);
+
+positionTT = timetable(t_utc_ds(:), pos_m_ds,  'VariableNames', {'Position'});
+velocityTT = timetable(t_utc_ds(:), vel_ms_ds, 'VariableNames', {'Velocity'});
+attTT      = timetable(t_utc_ds(:), q_ds,      'VariableNames', {'q'});
+
+% satellite
+sat = satellite(sc, positionTT, velocityTT, ...
+    'CoordinateFrame','inertial', 'Name','Mysat');
+
+% attitude 먼저 적용
+pointAt(sat, attTT, ...
+    "CoordinateFrame","inertial", ...
+    "Format","quaternion", ...
+    "ExtrapolationMethod","fixed");
+
+% (옵션) 바디축 표시 - 무거우면 주석처리하고 먼저 성공 확인
+coordinateAxes(sat, Scale=2);
+
+% ground station + access
+gs = groundStation(sc, 'Name','INHA-AE', ...
+    'Latitude', lat, 'Longitude', lon, 'Altitude', alt, ...
+    'MinElevationAngle', angle);
+
+ac = access(gs, sat);
+ac.LineColor = 'green';
+
+% ground track
+groundTrack(sat);
+
+% viewer & play
+viewer = satelliteScenarioViewer(sc);
+play(sc);
+%%
+itv = accessIntervals(ac);
+
+disp(itv);

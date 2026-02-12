@@ -234,18 +234,23 @@ t_detumble_end = t_att_utc(1) + seconds(Ts * 3); % 종료 시점 계산
 y_lims = ylim; % 현재 그래프의 y축 위아래 끝값 가져오기
 
 % 3. patch로 사각형 그리기 (시계 방향 또는 반시계 방향으로 꼭짓점 지정)
-% x좌표: 시작 -> 끝 -> 끝 -> 시작
-% y좌표: 바닥 -> 바닥 -> 천장 -> 천장
-x_patch = [t_att_utc(1), t_detumble_end, t_detumble_end, t_att_utc(1)];
-y_patch = [y_lims(1), y_lims(1), y_lims(2), y_lims(2)];
+x_patch_detumble = [t_att_utc(1), t_detumble_end, t_detumble_end, t_att_utc(1)];
+y_patch_detumble = [y_lims(1), y_lims(1), y_lims(2), y_lims(2)];
 
-p = patch(x_patch, y_patch, 'y', 'FaceAlpha', 0.3, 'EdgeColor', 'none');
-uistack(p, 'bottom'); % 색칠된 영역을 그래프 뒤로 보내기
+sun_idx = find(mode_hist == 1);
+t_sunpoint_start = t_att_utc(sun_idx(1));
+t_sunpoint_end = t_att_utc(sun_idx(end));
 
+x_patch_sun = [t_sunpoint_start, t_sunpoint_end, t_sunpoint_end, t_sunpoint_start];
+y_patch_sun = [y_lims(1), y_lims(1), y_lims(2), y_lims(2)];
+p_1 = patch(x_patch_detumble, y_patch_detumble, 'b', 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+p_2 = patch(x_patch_sun, y_patch_sun, 'y', 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+uistack(p_1, 'bottom'); % 색칠된 영역을 그래프 뒤로 보내기
+uistack(p_2, 'bottom');
 grid on; 
 ylabel('Ang Vel [deg/s]'); 
 xlabel('Time [sec]');
-legend('Detumbling Phase','\omega_x', '\omega_y', '\omega_z' );
+legend('Sunpointing Phase','Detumbling Phase','\omega_x', '\omega_y', '\omega_z' );
 title('Body Angular Velocity');
 hold off;
 % (4) Quaternion History
@@ -255,17 +260,20 @@ grid on; xlabel('Time [sec]'); ylabel('Quaternion');
 legend('q_x', 'q_y', 'q_z', 'q_w (Scalar)');
 title('Quaternion History');
 %%
+t_start = t_utc0;
 figure('Name', 'Initial Detumbling Validation', 'Color', 'w');
 
 % 1. 각속도 수렴 확인
 subplot(2,1,1);
 plot(t_att_utc, rad2deg(w_hist), 'LineWidth', 1.5); hold on;
 % 설계된 Ts 지점에 가이드라인 표시
+% t_start(datetime)에 seconds(Ts)(duration)를 더하면 결과는 datetime이 됩니다.
 xline(t_start + seconds(Ts), '--r', ['Target Ts (', num2str(Ts), 's)'], 'LineWidth', 1.2);
+yline(0, 'LineStyle','--');
 grid on; 
 ylabel('Ang Vel [deg/s]');
 title('Initial Detumbling: Angular Velocity Convergence');
-xlim([t_start, t_start + t_detumble_end]);
+xlim([t_start, t_detumble_end]);
 legend('\omega_x', '\omega_y', '\omega_z');
 
 % 2. 포인팅 오차 수렴 확인 (초기 Sun-Pointing 모드일 것임)
@@ -278,7 +286,7 @@ grid on;
 ylabel('Pointing Error [deg]');
 xlabel('Time [UTC]');
 title('Initial Orientation: Pointing Error Convergence');
-xlim([t_start, t_start + t_detumble_end]);
+xlim([t_start ,  t_detumble_end]);
 
 %%
 fprintf('\nStarting Real-Time Animation...\n');
@@ -462,7 +470,6 @@ pointAt(sat, attTT, ...
     "Format","quaternion", ...
     "ExtrapolationMethod","fixed");
 
-% (옵션) 바디축 표시 - 무거우면 주석처리하고 먼저 성공 확인
 coordinateAxes(sat, Scale=2);
 
 % ground station + access

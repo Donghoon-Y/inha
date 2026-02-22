@@ -1,4 +1,4 @@
-function dx = attitude_mode_switch(t, x, J, Kp, Kd, tau_max, r_eci_sat, v_eci_sat, unit_rho_sun, r_gs_ecef, angle,dt)
+function dx = attitude_mode_switch(t, x, J, Kp, Kd, tau_max, r_eci_sat, v_eci_sat, unit_rho_sun, r_gs_ecef, angle,dt, t_utc0)
      %상태변수
      q = x(1:4);
      w = x(5:7);
@@ -14,19 +14,21 @@ function dx = attitude_mode_switch(t, x, J, Kp, Kd, tau_max, r_eci_sat, v_eci_sa
      if k < 1, k =1; end
      if k > size(r_eci_sat, 1), k = size(r_eci_sat, 1); end
      %현재상태(m로 통일)
+
+     %시간정밀 세팅
+     t_current = t_utc0 + seconds(t);
+
      r_sat = r_eci_sat(k, :).'*1000; %3*1로 맞추기
      v_sat = v_eci_sat(k, :).'*1000;
      sun_point = unit_rho_sun(k,:).'; %단위벡터
 
      %지상국 ECI로 변환
-     We = 7.292115e-5; % [rad/s]
-     theta = We * t;   % 회전각
-     R_ecef2eci = [cos(theta), -sin(theta), 0;
-                  sin(theta),  cos(theta), 0;
-                           0,           0, 1];
-
-     r_gs_eci = R_ecef2eci*r_gs_ecef;
-     v_gs_eci = cross([0;0;We], r_gs_eci);
+     r_gs_eci = ecef2eci(t_current, r_gs_ecef); 
+     
+     % 2. 지상국 속도 변환 (지구 자전 효과 포함)
+     % dcmeci2ecef의 미분치를 활용하거나, 간단히 자전축 교적을 유지
+     We_vec = [0; 0; 7.292115e-5]; 
+     v_gs_eci = cross(We_vec, r_gs_eci);
 
      %모드 변환 기준 설정
      r_rel = r_gs_eci - r_sat;

@@ -76,8 +76,8 @@ fprintf("Converting ECI to ECEF (Original).......\n");
 for i = 1:length(t)
     utc_vec = datevec(t_utc(i));
     mjd = mjuliandate(utc_vec);
-    pm = polarMotion(mjd);
-    [re_m, ve_m] = eci2ecef(utc_vec, r_eci(i, :)*1000, v_eci(i, :)*1000,'pm', pm);
+    % pm = polarMotion(mjd);
+    [re_m, ve_m] = eci2ecef(utc_vec, r_eci(i, :)*1000, v_eci(i, :)*1000);
     
     r_ecef(i,:) = re_m/1000;
     v_ecef(i,:) = ve_m/1000;
@@ -118,7 +118,23 @@ tau_max = [0.1 * 1e-3; 0.1 * 1e-3; 0.1 * 1e-3];
 % Simulate (Switching ODE 호출)
 fprintf("Attitude Simulation Start (Switching Mode).......\n");
 
-[t_att, x_att] = q_rungekutta4(@(tt,xx) attitude_mode_switch(tt, xx, J, Kp, Kd, tau_max, r_eci, v_eci, rho_approx_hat, x_g_ecef*1000, angle, dt), tspan, x0_att, dt);
+r_gs_ecef_m = x_g_ecef*1000;
+
+point = length(t_utc);
+r_gs_eci_m = zeros(point, 3);
+
+for i = 1:point
+    r_temp = ecef2eci(t_utc(i), r_gs_ecef_m);
+    r_gs_eci_m(i, :) = r_temp;
+
+    if mod(i, 1000) == 0 
+        fprintf('Progress: %d / %d (%.1f%%)\n', i, point, (i/point)*100);
+    end
+end
+
+%%
+
+[t_att, x_att] = q_rungekutta4(@(tt,xx) attitude_mode_switch(tt, xx, J, Kp, Kd, tau_max, r_eci, v_eci, rho_approx_hat, r_gs_ecef_m, angle, dt, t_utc0), tspan, x0_att, dt);
 
 q_hist = x_att(1:4, :).'; 
 w_hist = x_att(5:7, :).';
@@ -131,53 +147,34 @@ control_torque = zeros(N,3);
 mode_hist = zeros(N,1); % 0: Sun, 1: Ground
 
 x_b = [1; 0; 0]; % Body Z-axis (Antenna)
-We = 7.292115e-5; %지구자전 각속도
 
 fprintf("Analyzing Results.......\n");
-for i = 1:N 
-    % Current State
-    t_now = t_att(i);
-    q_now = q_hist(i, :).'; 
-    w_now = w_hist(i, :).';
+for i = 1:N
+    % 현재 시점의 ECI 좌표들
+    r_sat_eci_m = r_eci(i, :).' * 1000;
+    r_gs_now_eci_m = r_gs_eci_m(i, :).';
     
-    k = i;
-    if k > size(r_eci, 1), k = size(r_eci, 1); end
-    
-    % Geometry Reconstruction (Simulate what the ODE did)
-    r_sat_m = r_eci(k, :).' * 1000;
-    
-    % Ground Station Position in ECI
-    theta = We * t_now;
-    R_ecef2eci = [cos(theta) -sin(theta) 0; sin(theta) cos(theta) 0; 0 0 1];
-    r_gs_m = R_ecef2eci * (x_g_ecef * 1000);
-    
-    % Visibility Check
-    r_rel_m = r_gs_m - r_sat_m;
-    u_zenith = r_gs_m / norm(r_gs_m);
-    u_gs2sat = -r_rel_m / norm(r_rel_m);
+    % 지상국 상대 벡터 및 고도각(Elevation) 계산
+    r_rel_eci_m = r_gs_now_eci_m - r_sat_eci_m;
+    u_zenith = r_gs_now_eci_m / norm(r_gs_now_eci_m);
+    u_gs2sat = -r_rel_eci_m / norm(r_rel_eci_m);
     elv_deg = rad2deg(asin(dot(u_gs2sat, u_zenith)));
     
-    % Mode Determination & Target Vector
+    % 모드 판별 및 타겟 벡터 설정
     if elv_deg >= angle
-        % [Mode: GROUND Station]
-        mode_hist(i) = 1; 
-        target_vec_eci = r_rel_m / norm(r_rel_m); 
-        % Control Torque Calculation (Approximate for plotting)
-        % 시각화용으로 간단히 에러에 비례한다고 가정하거나 0으로 둠
+        mode_hist(i) = 1; % Ground Station Mode
+        target_vec_eci = r_rel_eci_m / norm(r_rel_eci_m); 
     else
-        % [Mode: Sun]
-        mode_hist(i) = 0;
-        target_vec_eci = rho_approx_hat(k, :).'; % Look at Sun
+        mode_hist(i) = 0; % Sun Pointing Mode
+        target_vec_eci = rho_approx_hat(i, :).';
     end
     
-    % Pointing Error Calculation
-    % (Target Vector를 Body Frame으로 변환하여 Z축과 비교)
-    C_bi = dcm_q(q_now); 
+    % Pointing Error 계산 (Body Frame 변환)
+    C_bi = dcm_q(q_hist(i, :).'); % Quaternion to DCM
     target_vec_body = C_bi * target_vec_eci;
-    target_vec_body = target_vec_body / norm(target_vec_body);
     
     dot_val = dot(target_vec_body, x_b);
-    dot_val = max(min(dot_val, 1), -1);
+    dot_val = max(min(dot_val, 1), -1); % Numerical stability
     pointing_err_deg(i) = acosd(dot_val);
 end
 
@@ -250,7 +247,7 @@ uistack(p_2, 'bottom');
 grid on; 
 ylabel('Ang Vel [deg/s]'); 
 xlabel('Time [sec]');
-legend('Sunpointing Phase','Detumbling Phase','\omega_x', '\omega_y', '\omega_z' );
+legend('Ground Tracking Phase','Detumbling Phase','\omega_x', '\omega_y', '\omega_z' );
 title('Body Angular Velocity');
 hold off;
 % (4) Quaternion History
@@ -276,7 +273,7 @@ title('Initial Detumbling: Angular Velocity Convergence');
 xlim([t_start, t_detumble_end]);
 legend('\omega_x', '\omega_y', '\omega_z');
 
-% 2. 포인팅 오차 수렴 확인 (초기 Sun-Pointing 모드일 것임)
+% 2. 포인팅 오차 수렴 확인 
 subplot(2,1,2);
 plot(t_att_utc, pointing_err_deg, 'k', 'LineWidth', 1.5); hold on;
 xline(t_start + seconds(Ts), '--r', 'Target Ts');
@@ -285,155 +282,8 @@ yline(pointing_err_deg(1)*0.02, ':b', '2% Error Threshold');
 grid on;
 ylabel('Pointing Error [deg]');
 xlabel('Time [UTC]');
-title('Initial Orientation: Pointing Error Convergence');
+title('Ground Mode : Pointing Error Convergence');
 xlim([t_start ,  t_detumble_end]);
-
-%%
-fprintf('\nStarting Real-Time Animation...\n');
-
-play_speed = 1000; 
-step = play_speed; 
-
-f_anim = figure('Name', 'Real-Time Satellite Monitor', 'Color', 'w', 'Position', [100, 100, 1200, 900]);
-axis equal; grid on; hold on;
-xlabel('X [km]'); ylabel('Y [km]'); zlabel('Z [km]');
-set(gca, 'Color', 'w', 'XColor', 'k', 'YColor', 'k', 'ZColor', 'k', 'FontSize', 12);
-view(3);
-xlim([-a-3000, a+3000]); ylim([-a-3000, a+3000]); zlim([-a-3000, a+3000]);
-
-
-surf(xe, ye, ze, 'FaceColor', [0.1, 0.3, 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
-plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3), 'Color', [0.4 0.4 0.4], 'LineWidth', 0.5);
-
-h_sat = plot3(0,0,0, 'co', 'MarkerSize', 10, 'MarkerFaceColor', 'c', 'DisplayName', 'Satellite');
-h_gs = plot3(0,0,0, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'DisplayName', 'Incheon GS');
-h_link = plot3([0 0], [0 0], [0 0], 'y-', 'LineWidth', 3, 'DisplayName', 'Comm Link');
-h_sun = quiver3(0,0,0, 0,0,0, 0, 'Color', [1 0.6 0], 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Sun Vector');
-h_z_axis = quiver3(0,0,0, 0,0,0, 0, 'Color', 'c', 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Body x-axis');
-h_text = title('Initializing...', 'Color', 'k', 'FontSize', 15, 'FontWeight', 'bold');
-
-legend([h_sat, h_gs, h_link, h_sun, h_z_axis], 'Location', 'northeast');
-
-
-% 4. 애니메이션 루프
-N_total = length(t_att);
-vec_len = 4000; 
-
-fprintf('Animation Playing... \n');
-
-for k = 1 : step : N_total
-    % (1) 현재 인덱스 및 시간
-    idx = k;
-    if idx > size(r_eci,1), idx = size(r_eci,1); end
-    curr_time = t_att(k);
-    curr_time_utc = t_att_utc(k);
-    
-    % (2) 위치 업데이트
-    % 위성 (ECI)
-    sat_pos = r_eci(idx, :);
-    set(h_sat, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3));
-    
-    % 지상국 (ECI 회전 반영)
-    theta = We * curr_time;
-    R_rot = [cos(theta) -sin(theta) 0; sin(theta) cos(theta) 0; 0 0 1];
-    gs_pos = (R_rot * x_g_ecef * 1000 / 1000)'; % [km]
-    set(h_gs, 'XData', gs_pos(1), 'YData', gs_pos(2), 'ZData', gs_pos(3));
-    
-    % (3) 자세 및 벡터 업데이트
-    q_curr = q_hist(k, :);
-    % 사용자 정의 함수 dcm_q 사용 (Inertial -> Body 가정 시 Transpose 주의)
-    C_bi = dcm_q(q_curr); 
-    
-    % Body Z축을 ECI로 변환 (C_bi' * [0;0;1])
-    z_body = [1;0;0];
-    z_eci = (C_bi' * z_body)';
-    
-    % 태양 벡터
-    sun_vec = rho_approx_hat(idx, :);
-    
-    % 화살표 그리기
-    set(h_z_axis, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
-                  'UData', z_eci(1)*vec_len, 'VData', z_eci(2)*vec_len, 'WData', z_eci(3)*vec_len);
-              
-    set(h_sun, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
-               'UData', sun_vec(1)*vec_len, 'VData', sun_vec(2)*vec_len, 'WData', sun_vec(3)*vec_len);
-    
-    % (4) 모드별 시각화 (Ground Tracking vs Sun Pointing)
-    time_str = datestr(curr_time_utc, 'yyyy-mm-dd HH:MM:SS');
-    if mode_hist(k) == 1 % Ground Mode
-        % 링크 연결 (노란선 ON)
-        set(h_link, 'XData', [sat_pos(1) gs_pos(1)], ...
-                    'YData', [sat_pos(2) gs_pos(2)], ...
-                    'ZData', [sat_pos(3) gs_pos(3)], 'Visible', 'on');
-        
-        % 태양 화살표 숨김 (집중)
-        set(h_sun, 'Visible', 'on');
-        
-        status_msg = sprintf('[%s] UTC | Mode: GROUND TRACKING', time_str);
-        set(h_text, 'String', status_msg, 'Color', 'g');
-        
-    else % Sun Mode
-        % 링크 끊김 (노란선 OFF)
-        set(h_link, 'Visible', 'off');
-        
-        % 태양 화살표 보이기
-        set(h_sun, 'Visible', 'on');
-        
-        status_msg = sprintf('[%s] UTC | Mode: SUN POINTING', time_str);
-        set(h_text, 'String', status_msg, 'Color', 'k');
-    end
-    
-    drawnow; 
-end
-fprintf('Animation Finished.\n');
-
-%%
-% 1. Ground Mode인 인덱스만 추출
-idx_ground = find(mode_hist == 1);
-
-if isempty(idx_ground)
-    fprintf('\n[Result] 지상국과 접속한 구간이 없습니다. (Check Angle or Time)\n');
-else
-    % 2. 해당 구간의 오차값 추출
-    ground_errors = pointing_err_deg(idx_ground);
-    ground_times = t_att_utc(idx_ground);
-    
-    % 3. 정착 시간(Settling Time) 이후의 오차만 보기 (Steady State)
-    % 모드 전환 직후에는 위성이 회전하느라 오차가 큽니다.
-    % 따라서 처음 50초(Ts) 정도는 제외하고 그 뒤에 얼마나 정밀한지 봐야 합니다.
-    
-    % 간단하게 접속 후반부 50% 데이터만 가지고 정밀도 분석
-    cut_idx = round(length(ground_errors) * 0.5); 
-    steady_errors = ground_errors(cut_idx:end);
-    
-    % 4. 통계 출력
-    fprintf('\n============================================================\n');
-    fprintf('   GROUND TARGETING PERFORMANCE REPORT\n');
-    fprintf('============================================================\n');
-    fprintf('총 접속 시간:       %.1f 초\n', length(ground_errors) * dt);
-    fprintf('------------------------------------------------------------\n');
-    fprintf('[전체 접속 구간] (회전 기동 포함)\n');
-    fprintf('  - 최대 오차 (Max):  %.4f 도\n', max(ground_errors));
-    fprintf('  - 평균 오차 (Mean): %.4f 도\n', mean(ground_errors));
-    fprintf('------------------------------------------------------------\n');
-    fprintf('[안정화 이후 구간] (Steady State, 후반 50%%)\n');
-    fprintf('  - 최대 오차 (Max):  %.6f 도\n', max(steady_errors));
-    fprintf('  - 평균 오차 (Mean): %.6f 도\n', mean(steady_errors));
-    fprintf('  - RMSE 오차:        %.6f 도\n', rms(steady_errors));
-    fprintf('============================================================\n\n');
-
-    % 5. 오차 확대 그래프 (지상국 구간만)
-    figure('Name', 'Ground Tracking Error Zoom', 'Color', 'w');
-    plot(ground_times, ground_errors, 'r-', 'LineWidth', 1.5);
-    grid on; xlabel('Time [UTC]'); ylabel('Pointing Error [deg]');
-    title('Ground Tracking Accuracy (Zoomed In)');
-    
-    % y축 스케일을 오차에 맞춰서 조정 (로그 스케일 아님)
-    % 안정화 이후 오차가 작다면 y축을 확대
-    if max(steady_errors) < 1
-        ylim([0, max(ground_errors)*1.1]); 
-    end
-end
 %%
 startTime = t_att_utc(1);
 stopTime = t_att_utc(end);
@@ -490,3 +340,100 @@ play(sc);
 itv = accessIntervals(ac);
 
 disp(itv);
+%%
+fprintf('\nStarting Real-Time Animation...\n');
+
+play_speed = 300; 
+step = play_speed; 
+
+f_anim = figure('Name', 'Real-Time Satellite Monitor', 'Color', 'w', 'Position', [100, 100, 1200, 900]);
+axis equal; grid on; hold on;
+xlabel('X [km]'); ylabel('Y [km]'); zlabel('Z [km]');
+set(gca, 'Color', 'w', 'XColor', 'k', 'YColor', 'k', 'ZColor', 'k', 'FontSize', 12);
+view(3);
+xlim([-a-3000, a+3000]); ylim([-a-3000, a+3000]); zlim([-a-3000, a+3000]);
+
+
+surf(xe, ye, ze, 'FaceColor', [0.1, 0.3, 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
+plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3), 'Color', [0.4 0.4 0.4], 'LineWidth', 0.5);
+
+h_sat = plot3(0,0,0, 'co', 'MarkerSize', 10, 'MarkerFaceColor', 'c', 'DisplayName', 'Satellite');
+h_gs = plot3(0,0,0, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'DisplayName', 'Incheon GS');
+h_link = plot3([0 0], [0 0], [0 0], 'y-', 'LineWidth', 3, 'DisplayName', 'Comm Link');
+h_sun = quiver3(0,0,0, 0,0,0, 0, 'Color', [1 0.6 0], 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Sun Vector');
+h_z_axis = quiver3(0,0,0, 0,0,0, 0, 'Color', 'c', 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Body x-axis');
+h_text = title('Initializing...', 'Color', 'k', 'FontSize', 15, 'FontWeight', 'bold');
+
+legend([h_sat, h_gs, h_link, h_sun, h_z_axis], 'Location', 'northeast');
+
+% 4. 애니메이션 루프
+N_total = length(t_att);
+vec_len = 4000; 
+
+fprintf('Animation Playing... \n');
+
+for k = 1 : step : N_total
+    % (1) 현재 인덱스 및 시간
+    idx = k;
+    if idx > size(r_eci,1), idx = size(r_eci,1); end
+    curr_time = t_att(k);
+    curr_time_utc = t_att_utc(k);
+    
+    % (2) 위치 업데이트
+    % 위성 (ECI)
+    sat_pos = r_eci(idx, :);
+    set(h_sat, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3));
+    
+    % 지상국 (ECI 회전 반영)
+    gs_pos = r_gs_eci_m(idx,:)/1000;
+
+    set(h_gs, 'XData', gs_pos(1), 'YData', gs_pos(2), 'ZData', gs_pos(3));
+    
+    % (3) 자세 및 벡터 업데이트
+    q_curr = q_hist(k, :);
+    % 사용자 정의 함수 dcm_q 사용 (Inertial -> Body 가정 시 Transpose 주의)
+    C_bi = dcm_q(q_curr); 
+    
+    % Body Z축을 ECI로 변환 (C_bi' * [0;0;1])
+    z_body = [1;0;0];
+    z_eci = (C_bi' * z_body)';
+    
+    % 태양 벡터
+    sun_vec = rho_approx_hat(idx, :);
+    
+    % 화살표 그리기
+    set(h_z_axis, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
+                  'UData', z_eci(1)*vec_len, 'VData', z_eci(2)*vec_len, 'WData', z_eci(3)*vec_len);
+              
+    set(h_sun, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
+               'UData', sun_vec(1)*vec_len, 'VData', sun_vec(2)*vec_len, 'WData', sun_vec(3)*vec_len);
+    
+    % (4) 모드별 시각화 (Ground Tracking vs Sun Pointing)
+    time_str = datestr(curr_time_utc, 'yyyy-mm-dd HH:MM:SS');
+    if mode_hist(k) == 1 % Ground Mode
+        % 링크 연결 (노란선 ON)
+        set(h_link, 'XData', [sat_pos(1) gs_pos(1)], ...
+                    'YData', [sat_pos(2) gs_pos(2)], ...
+                    'ZData', [sat_pos(3) gs_pos(3)], 'Visible', 'on');
+        
+        % 태양 화살표 숨김 (집중)
+        set(h_sun, 'Visible', 'on');
+        
+        status_msg = sprintf('[%s] UTC | Mode: GROUND TRACKING', time_str);
+        set(h_text, 'String', status_msg, 'Color', 'g');
+        
+    else % Sun Mode
+        % 링크 끊김 (노란선 OFF)
+        set(h_link, 'Visible', 'off');
+        
+        % 태양 화살표 보이기
+        set(h_sun, 'Visible', 'on');
+        
+        status_msg = sprintf('[%s] UTC | Mode: SUN POINTING', time_str);
+        set(h_text, 'String', status_msg, 'Color', 'k');
+    end
+    
+    % (5) 화면 갱신 (핵심!)
+    drawnow; 
+end
+fprintf('Animation Finished.\n');

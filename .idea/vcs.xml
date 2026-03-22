@@ -2,6 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/beluga/beluga" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/traj-opt/OptimTraj" vcs="Git" />
   </component>
 </project>

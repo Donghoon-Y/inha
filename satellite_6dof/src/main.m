@@ -56,8 +56,8 @@ r0 = pqw2eci*r_pqw;
 v0 = pqw2eci*v_pqw;
 T_period = 2*pi*sqrt(a^3/mu);
 x0 = [r0; v0];
-tspan = [0 8*T_period]; 
-dt = 0.1;
+tspan = [0 5*T_period]; 
+dt = 0.5;
 
 fprintf("Orbit Simulation Start.......\n");
 [t, x] = rungekutta4(@(t,x) odeTwoBody(t,x,mu), tspan, x0, dt);
@@ -337,103 +337,19 @@ groundTrack(sat);
 viewer = satelliteScenarioViewer(sc);
 play(sc);
 %%
-itv = accessIntervals(ac);
+fprintf("Exporting simulation data to CSV...\n");
 
-disp(itv);
-%%
-fprintf('\nStarting Real-Time Animation...\n');
+% 열(Column) 벡터 형태로 크기 통일 (Nx1 보장)
+t_export = t_att(:); 
 
-play_speed = 300; 
-step = play_speed; 
+% 데이터를 하나의 행렬로 병합 (총 18열)
+% [시간(1), 쿼터니언(4), 각속도(3), 태양벡터(3), 위성위치(3), 지상국위치(3), 모드(1)]
+export_data = [t_export, q_hist, w_hist, rho_approx_hat, r_eci, r_gs_eci_m, mode_hist];
 
-f_anim = figure('Name', 'Real-Time Satellite Monitor', 'Color', 'w', 'Position', [100, 100, 1200, 900]);
-axis equal; grid on; hold on;
-xlabel('X [km]'); ylabel('Y [km]'); zlabel('Z [km]');
-set(gca, 'Color', 'w', 'XColor', 'k', 'YColor', 'k', 'ZColor', 'k', 'FontSize', 12);
-view(3);
-xlim([-a-3000, a+3000]); ylim([-a-3000, a+3000]); zlim([-a-3000, a+3000]);
+% CSV 파일로 저장
+file_name = 'my_satellite_data.csv';
+writematrix(export_data, file_name);
 
-
-surf(xe, ye, ze, 'FaceColor', [0.1, 0.3, 0.8], 'EdgeColor', 'none', 'FaceAlpha', 0.6);
-plot3(r_eci(:,1), r_eci(:,2), r_eci(:,3), 'Color', [0.4 0.4 0.4], 'LineWidth', 0.5);
-
-h_sat = plot3(0,0,0, 'co', 'MarkerSize', 10, 'MarkerFaceColor', 'c', 'DisplayName', 'Satellite');
-h_gs = plot3(0,0,0, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'DisplayName', 'Incheon GS');
-h_link = plot3([0 0], [0 0], [0 0], 'y-', 'LineWidth', 3, 'DisplayName', 'Comm Link');
-h_sun = quiver3(0,0,0, 0,0,0, 0, 'Color', [1 0.6 0], 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Sun Vector');
-h_z_axis = quiver3(0,0,0, 0,0,0, 0, 'Color', 'c', 'LineWidth', 2, 'MaxHeadSize', 0.5, 'DisplayName', 'Body x-axis');
-h_text = title('Initializing...', 'Color', 'k', 'FontSize', 15, 'FontWeight', 'bold');
-
-legend([h_sat, h_gs, h_link, h_sun, h_z_axis], 'Location', 'northeast');
-
-% 4. 애니메이션 루프
-N_total = length(t_att);
-vec_len = 4000; 
-
-fprintf('Animation Playing... \n');
-
-for k = 1 : step : N_total
-    % (1) 현재 인덱스 및 시간
-    idx = k;
-    if idx > size(r_eci,1), idx = size(r_eci,1); end
-    curr_time = t_att(k);
-    curr_time_utc = t_att_utc(k);
-    
-    % (2) 위치 업데이트
-    % 위성 (ECI)
-    sat_pos = r_eci(idx, :);
-    set(h_sat, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3));
-    
-    % 지상국 (ECI 회전 반영)
-    gs_pos = r_gs_eci_m(idx,:)/1000;
-
-    set(h_gs, 'XData', gs_pos(1), 'YData', gs_pos(2), 'ZData', gs_pos(3));
-    
-    % (3) 자세 및 벡터 업데이트
-    q_curr = q_hist(k, :);
-    % 사용자 정의 함수 dcm_q 사용 (Inertial -> Body 가정 시 Transpose 주의)
-    C_bi = dcm_q(q_curr); 
-    
-    % Body Z축을 ECI로 변환 (C_bi' * [0;0;1])
-    z_body = [1;0;0];
-    z_eci = (C_bi' * z_body)';
-    
-    % 태양 벡터
-    sun_vec = rho_approx_hat(idx, :);
-    
-    % 화살표 그리기
-    set(h_z_axis, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
-                  'UData', z_eci(1)*vec_len, 'VData', z_eci(2)*vec_len, 'WData', z_eci(3)*vec_len);
-              
-    set(h_sun, 'XData', sat_pos(1), 'YData', sat_pos(2), 'ZData', sat_pos(3), ...
-               'UData', sun_vec(1)*vec_len, 'VData', sun_vec(2)*vec_len, 'WData', sun_vec(3)*vec_len);
-    
-    % (4) 모드별 시각화 (Ground Tracking vs Sun Pointing)
-    time_str = datestr(curr_time_utc, 'yyyy-mm-dd HH:MM:SS');
-    if mode_hist(k) == 1 % Ground Mode
-        % 링크 연결 (노란선 ON)
-        set(h_link, 'XData', [sat_pos(1) gs_pos(1)], ...
-                    'YData', [sat_pos(2) gs_pos(2)], ...
-                    'ZData', [sat_pos(3) gs_pos(3)], 'Visible', 'on');
-        
-        % 태양 화살표 숨김 (집중)
-        set(h_sun, 'Visible', 'on');
-        
-        status_msg = sprintf('[%s] UTC | Mode: GROUND TRACKING', time_str);
-        set(h_text, 'String', status_msg, 'Color', 'g');
-        
-    else % Sun Mode
-        % 링크 끊김 (노란선 OFF)
-        set(h_link, 'Visible', 'off');
-        
-        % 태양 화살표 보이기
-        set(h_sun, 'Visible', 'on');
-        
-        status_msg = sprintf('[%s] UTC | Mode: SUN POINTING', time_str);
-        set(h_text, 'String', status_msg, 'Color', 'k');
-    end
-    
-    % (5) 화면 갱신 (핵심!)
-    drawnow; 
-end
-fprintf('Animation Finished.\n');
+fprintf("Data successfully saved to %s\n", file_name);
+fprintf("- Total Samples: %d\n", N);
+fprintf("- Total Columns: %d\n", size(export_data, 2));

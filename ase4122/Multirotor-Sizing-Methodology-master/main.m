@@ -31,7 +31,7 @@ ThrustWeightRatio = 2; % estimator for maximum paerformance
                     % 4 - survaillence
                     % 5+ - aerobatics / hi-speed video
                     % 7+ - racing
-PropDiameter_Min = 11; % inch, min. propeller diameter
+PropDiameter_Min = 0; % inch, min. propeller diameter
 PropDiameter_Max = 14; % inch, max. propeller diameter
 SafetyFactor = 1.1; % [1-2], arbitrary safety parameter
 AcceptedTypes = {'MR' 'E-3' 'E-4'}; % preferred propeller series
@@ -61,7 +61,7 @@ mass_Propeller_Est = 18;
 mass_optical = 1.5;
 
 % mass_Payload = 977;
-mass_Payload = 2750;
+mass_Payload = 500;
 mass_Battery = 473; % Lumenier 5200mAh 4s 35c
 mass_Other_Est = 20; % cabling, straps, standoffs, etc.
 

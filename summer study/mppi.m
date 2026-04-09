@@ -69,4 +69,3 @@ plot(t, x(1:end,6));
 legend("Uz");
 xlabel("Time(s)", FontSize=13)
 grid on;
-

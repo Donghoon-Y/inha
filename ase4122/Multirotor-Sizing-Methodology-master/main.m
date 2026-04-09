@@ -15,13 +15,11 @@ thisFile = mfilename('fullpath');
 thisDir  = fileparts(thisFile);
 addpath(genpath(thisDir)); 
 
-
 RPM2RAD = 2*pi/60;
 RAD2RPM = 60/2/pi;
-
 %% User parameters
 RotorNo = 4; % Number of rotors
-OptimisationGoal = 'hover'; % selection criteria
+OptimisationGoal = 'utilisation'; % selection criteria
                     % hover - best specific thrust (g/W) at hover
                     % max - best specific thrust (g/W) at 100% throttle
                     % utilisation - maximum usable power range of propeller

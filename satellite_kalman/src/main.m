@@ -300,21 +300,6 @@ if ~isempty(mode_switch_idx)
     xlabel('Time [sec]','FontSize',12);
 end
 
-% --- (5) R_gs_eff ---
-figure('Name','R_gs Adaptation','Color','w','Position',[300,300,1000,400]);
-r_nominal_line = rad2deg(sqrt(R_gs(1,1))) * ones(N,1);
-r_eff_plot = R_gs_eff_hist;
-r_eff_plot(mode == 0) = NaN;
-plot(t_sim, r_nominal_line, 'b--', 'LineWidth',1.5, 'DisplayName','R\_gs nominal'); hold on;
-plot(t_sim, r_eff_plot, 'r', 'LineWidth',1.2, 'DisplayName','R\_gs effective');
-for s = 1:length(mode_switch_idx)
-    xline(t_sim(mode_switch_idx(s)), '--k', 'Alpha', 0.4);
-end
-grid on;
-ylabel('1-sigma [deg]','FontSize',12);
-xlabel('Time [sec]','FontSize',12);
-legend('Location','best','FontSize',11);
-
 %% 헬퍼 함수
 function s = mode_str(m)
     if m == 0, s = 'Sun';

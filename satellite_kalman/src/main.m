@@ -1,4 +1,5 @@
-clc; clear;
+clc; 
+clear all;
 thisFile = mfilename('fullpath');
 thisDir  = fileparts(thisFile);
 addpath(genpath(thisDir));
@@ -297,7 +298,6 @@ if ~isempty(mode_switch_idx)
     end
     grid on;
     xlabel('Time [sec]','FontSize',12);
-    title('모드 전환 구간 확대 — 개선 확인용','FontSize',13,'FontWeight','bold');
 end
 
 % --- (5) R_gs_eff ---
@@ -313,7 +313,6 @@ end
 grid on;
 ylabel('1-sigma [deg]','FontSize',12);
 xlabel('Time [sec]','FontSize',12);
-title('GS R\_gs 적응 (방법 2)','FontSize',13,'FontWeight','bold');
 legend('Location','best','FontSize',11);
 
 %% 헬퍼 함수

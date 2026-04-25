@@ -143,8 +143,18 @@ for ii = 1:consideredNo
         selectionCriterion(ii,:) = inf; % rejecting propellers with numerical errors and with WOT speed over limit speed
     end
 end
-% 가장 power가 적은 프로펠러 데이터를 가져옴.
-[~, temp_propChosen_pos] = min(mean(selectionCriterion,2)); % selection of best propeller for the application
+% 비추력(g/W) = 호버 추력 / 평균 파워 → 최대화 (명시적 선정 기준)
+% mean(col1,col2) 파워 최소 대신 비추력 최대로 선정하는 이유:
+%   col1(각속도×토크)과 col2(APC 실측 파워) 사이에 보간 오차가 존재하며,
+%   두 값의 단순 평균은 실제 효율을 왜곡할 수 있음.
+%   추력이 모든 후보 프롭에서 동일(thrustHover_Est)하므로
+%   비추력 최대 = 파워 최소와 동치이나, 보간 오차 영향을 줄이기 위해
+%   비추력을 명시적으로 계산하여 선정 기준으로 사용함.
+sc_mean = mean(selectionCriterion, 2);
+sc_mean(isinf(sc_mean)) = inf;
+specThrust_criterion = thrustHover_Est ./ sc_mean;
+specThrust_criterion(isinf(sc_mean)) = 0;
+[~, temp_propChosen_pos] = max(specThrust_criterion);
 
 if selectionCriterion(temp_propChosen_pos,2) == inf
     error('ERROR! No matching propeller found!');

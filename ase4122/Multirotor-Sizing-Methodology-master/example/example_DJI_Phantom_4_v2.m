@@ -16,7 +16,7 @@ RAD2RPM = 60/2/pi;
 
 %% User parameters
 RotorNo = 4;
-OptimisationGoal = 'hover'; % hover - best specific thrust (g/W) at hover
+OptimisationGoal = 'utilisation'; % hover - best specific thrust (g/W) at hover
                             % max - best specific thrust (g/W) at 100% throttle
                             % utilisation - maximum usable power range of propeller
 ThrustWeightRatio = 3; % 2 - minimum

@@ -18,7 +18,7 @@
 
 ---
 
-## 📁 구조
+## 구조
 
 ```
 src/
@@ -37,7 +37,7 @@ report/
 
 ---
 
-## ▶️ 실행 방법
+## 실행 방법
 
 MATLAB에서 `src/main.m` 실행.  
 Aerospace Toolbox 필요 (`eci2ecef`, `ecef2lla`, `satelliteScenario` 등 사용).

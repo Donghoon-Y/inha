@@ -35,15 +35,17 @@ W_N     = mass_Total * 1e-3 * g_acc;   % 기체 중량 [N]
 %   - 일반 쿼드콥터: ~0.8~1.2
 Cd_frame = 1.0;
 
-% 기준 기체 면적 계산 (Pollet Eq. 11-12, DJI 스케일링 법칙)
-%   기준: DJI Mavic 2 (MTOW ≈ 0.907 kg, Stop_ref ≈ 0.028 m², Sfront_ref ≈ 0.009 m²)
-M_ref      = 0.907;        % kg
-Stop_ref   = 0.028;        % m²
-Sfront_ref = 0.009;        % m²
-M_total_kg = mass_Total * 1e-3;
-
-Stop   = Stop_ref   * (M_total_kg / M_ref)^(2/3);   % 상면 면적 [m²]
-Sfront = Sfront_ref * (M_total_kg / M_ref)^(2/3);   % 전면 면적 [m²]
+% ── S500 프레임 실측 면적 직접 지정 ─────────────────────────────────────
+% S500 스펙: 휠베이스 500mm, 암 220×40mm × 4개, 중앙판 170×140mm
+%            랜딩기어 파이프 φ16mm × 200mm × 2개
+%
+% Stop  (상면 투영): 암 4개(0.220×0.040×4) + 중앙판(0.170×0.140) = ~0.059 m²
+% Sfront(정면 투영): 중앙판 정면 + 앞암 2개 + 랜딩기어 = ~0.021 m²
+%
+% ※ DJI 스케일링 법칙(M_ref 기준)은 폴딩/밀폐형 기체 기준이라 S500 오픈 프레임에
+%    적용 시 Stop이 ~20% 과소평가됨 → 실측값 직접 사용
+Stop   = 0.059;   % m²  (S500 상면 투영 실측)
+Sfront = 0.021;   % m²  (S500 정면 투영 실측, 랜딩기어 포함)
 
 fprintf('\n======= 전진비행 기동성 최적화 =======\n');
 fprintf('기체 중량  : %.1f g  (%.3f N)\n', mass_Total, W_N);
@@ -273,26 +275,62 @@ fprintf('  로터 1개 토크     : %.4f Nm\n', Torque_ff);
 
 %% ── [2안 모터 선정] ─────────────────────────────────────────────────────
 % 전진비행 운용점을 기준으로 모터 필터링
-% operatingPoints를 전진비행 기준값으로 덮어씌워 load_motorList 재활용
-fprintf('\n[2안 모터 선정 중...]\n');
+fprintf('\n[모터 선정 중...]\n');
 
-% prop speedMax = RPM_ff * SafetyFactor (전진비행에서의 최고 RPM)
-speedMax_ff   = RPM_ff * SafetyFactor;
-torqueMax_ff  = Torque_ff * SafetyFactor;
+% ── 운용점 정리 ──────────────────────────────────────────────────────────
+% 호버 운용점 (main.m에서 이미 계산됨)
+speedHover_ff  = operatingPoints{idx_ff_best,1}(1);   % [RPM]
+torqueHover_ff = operatingPoints{idx_ff_best,1}(3) * SafetyFactor; % [Nm]
 
-% 호버 토크는 main.m 의 값 그대로 유지 (호버도 커버해야 하므로)
-speedHover_ff  = operatingPoints{idx_ff_best,1}(1);
-torqueHover_ff = operatingPoints{idx_ff_best,1}(3) * SafetyFactor;
+% 전진비행 운용점 (이 파일에서 계산)
+speedFF_rpm   = RPM_ff;                        % [RPM]
+torqueFF_nm   = Torque_ff * SafetyFactor;      % [Nm]
+
+% load_motorList 는 "prop_speedMax" 로 kV 적합성을 판단함
+% (조건: 0.8 * Vbatt * kV > prop_speedMax)
+% → 호버와 전진비행 중 더 높은 RPM을 상한으로 사용
+speedMax_design = max(speedHover_ff, speedFF_rpm) * SafetyFactor; % [RPM]
+torqueMax_design = max(torqueHover_ff, torqueFF_nm);               % [Nm]
+
+% 질량 상한: main.m 의 mass_Motor_Est 를 기준으로 하되,
+%           실제 모터 목록에 해당 질량 이하가 충분히 있는지 확인 후 자동 완화
+spec_mass_ff = mass_Motor_Est;
+
+fprintf('  전진비행 RPM     : %.0f RPM  (여유 포함 %.0f RPM)\n', RPM_ff, speedMax_design);
+fprintf('  전진비행 Torque  : %.4f Nm  (여유 포함 %.4f Nm)\n', Torque_ff, torqueMax_design);
+fprintf('  호버 RPM         : %.0f RPM\n', speedHover_ff);
+fprintf('  kV 최소 요구값   : %.0f KV  (= speedMax/0.8/Vbatt)\n', ...
+    speedMax_design / (0.8 * BattCellNo * BattCellVoltage));
+fprintf('  모터 질량 상한   : %.0f g\n', spec_mass_ff);
 
 motorList_ff = load_motorList( ...
-    BattCellNo * BattCellVoltage, ...   % 배터리 전압
-    speedMax_ff, torqueMax_ff, ...      % 전진비행 최대 운용점
-    speedHover_ff, torqueHover_ff, ...  % 호버 운용점
-    mass_Motor_Est);                    % 모터 질량 상한
+    BattCellNo * BattCellVoltage, ...    % 배터리 전압
+    speedMax_design, torqueMax_design, ...% 최대 운용점 (호버/전진 중 큰 값)
+    speedHover_ff, torqueHover_ff, ...   % 호버 운용점
+    spec_mass_ff);                       % 모터 질량 상한
+
+% 후보가 없으면 질량 상한을 단계적으로 완화
+if isempty(motorList_ff)
+    fprintf('  [질량 상한 완화 시도]\n');
+    for mass_relax = [150, 200, 999]
+        motorList_ff = load_motorList( ...
+            BattCellNo * BattCellVoltage, ...
+            speedMax_design, torqueMax_design, ...
+            speedHover_ff, torqueHover_ff, ...
+            mass_relax);
+        if ~isempty(motorList_ff)
+            fprintf('  → 질량 상한 %dg 으로 완화 후 후보 %d개 발견\n', ...
+                mass_relax, size(motorList_ff,1));
+            break;
+        end
+    end
+end
 
 if isempty(motorList_ff)
-    fprintf('[경고] 전진비행 조건을 만족하는 모터가 없습니다.\n');
-    fprintf('  → mass_Motor_Est(현재 %dg) 또는 배터리 셀 수를 늘려 보십시오.\n', mass_Motor_Est);
+    fprintf('[오류] 질량 상한 999g 까지 완화해도 조건 만족 모터 없음.\n');
+    fprintf('  kV 최소 요구값 %.0f KV 이상인 모터가 목록에 없거나\n', ...
+        speedMax_design / (0.8 * BattCellNo * BattCellVoltage));
+    fprintf('  배터리 전압(%dS=%.1fV)이 너무 낮을 수 있습니다.\n', BattCellNo, BattCellNo*BattCellVoltage);
 else
     % 전진비행 전력 최소 모터 선정
     [~, idx_motor_ff] = min([motorList_ff{:,8}]);
@@ -399,7 +437,7 @@ end
 yline(0, 'k:', 'LineWidth', 1.5, 'DisplayName', '여유추력=0 (Vmax 한계)');
 xlabel('전진 속도 V [m/s]', 'FontSize', 12);
 ylabel('여유 추력 [g]', 'FontSize', 12);
-title('[설계 2안] 전진속도 vs 여유추력 (RPM 한계 기준)', 'FontSize', 13);
+title('전진속도 vs 여유추력 (RPM 한계 기준)', 'FontSize', 13);
 legend('Location', 'southwest', 'FontSize', 10);
 grid on;
 xlim([0, max(V_scan)]);

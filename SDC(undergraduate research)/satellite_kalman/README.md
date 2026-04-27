@@ -1,6 +1,6 @@
 # satellite_kalman
 
-`satellite_6dof` 시뮬레이션 결과를 입력으로 받아 **확장 칼만 필터(EKF)**로 위성의 자세(쿼터니언)와 자이로 바이어스를 추정하는 알고리즘.
+`satellite_6dof` 시뮬레이션 결과를 입력으로 받아 확장 칼만 필터(EKF)로 위성의 자세(쿼터니언)와 자이로 바이어스를 추정하는 알고리즘.
 
 ---
 
@@ -15,7 +15,7 @@
 
 ---
 
-## 📁 구조
+## 구조
 
 ```
 src/
@@ -33,7 +33,7 @@ src/
 
 ---
 
-## ▶️ 실행 방법
+## 실행 방법
 
 1. `satellite_6dof/src/main.m` 실행 후 생성된 `my_satellite_data.csv`를 `src/`에 위치
 2. MATLAB에서 `src/main.m` 실행

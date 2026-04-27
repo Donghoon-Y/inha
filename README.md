@@ -22,7 +22,7 @@ Folders are named by course code (e.g. `ASE3102`).
 | `ase4122` | 항공우주종합설계 |
 | `ase4124` | 비행동역학 및 제어 |
 | `ase7030` | 컨벡스최적화 |
-| `SDC(undergraduate research)` | SDC 학부연구생 |
+
 
 ---
 

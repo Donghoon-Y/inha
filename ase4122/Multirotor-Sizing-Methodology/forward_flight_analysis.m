@@ -47,7 +47,7 @@ Cd_frame = 1.0;
 Stop   = 0.059;   % m²  (S500 상면 투영 실측)
 Sfront = 0.021;   % m²  (S500 정면 투영 실측, 랜딩기어 포함)
 
-fprintf('\n======= 전진비행 기동성 최적화 =======\n');
+fprintf('\n======= [설계 2안] 전진비행 기동성 최적화 =======\n');
 fprintf('기체 중량  : %.1f g  (%.3f N)\n', mass_Total, W_N);
 fprintf('Cd_frame   : %.2f\n', Cd_frame);
 fprintf('Stop / Sfront : %.4f m² / %.4f m²\n', Stop, Sfront);
@@ -82,10 +82,13 @@ eta_P = @(alpha, J, beta) ...
         (2 * (1 - J*sin(alpha) / max(find_J0(beta, CP_axial), 1e-6)));
 
 %% ── [각 prop별 최대 전진속도 계산] ─────────────────────────────────────
-V_max_all  = nan(consideredNo, 1);   % 최대 전진속도 [m/s]
-alpha_opt  = nan(consideredNo, 1);   % 최대속도에서 기체 경사각 [rad]
-P_ff_all   = nan(consideredNo, 1);   % 전진비행에서 소비 전력 [W] (1개 로터)
-T_ff_all   = nan(consideredNo, 1);   % 전진비행에서 1개 로터 추력 [N]
+V_max_all          = nan(consideredNo, 1);   % 최대 전진속도 [m/s]
+alpha_opt          = nan(consideredNo, 1);   % 최대속도에서 기체 경사각 [rad]
+P_ff_all           = nan(consideredNo, 1);   % 전진비행에서 소비 전력 [W] (1개 로터)
+T_ff_all           = nan(consideredNo, 1);   % 전진비행에서 1개 로터 추력 [N]
+T_surplus_hover_all = nan(consideredNo, 1);  % V=0 정지 여유추력 합계 [N]
+t_lap_all          = nan(consideredNo, 1);   % 10회 왕복 추정 시간 [s]
+L_course           = 2.0;                    % 왕복 코스 길이 [m]
 
 V_scan = 0 : 0.5 : 40;   % 속도 스캔 범위 [m/s]
 
@@ -176,59 +179,93 @@ for ii = 1:consideredNo
         P_ff_scan(kk) = max(CP_ff * rho * n_req^3 * D_m^5, 0);   % [W/rotor]
     end % V_scan
 
-    % 최대 전진속도 = T_surplus가 0이 되는 점 (가장 큰 V)
+    % ── 최대 전진속도 계산 ─────────────────────────────────────────────
     idx_valid = find(T_surplus > 0);
     if isempty(idx_valid)
         V_max_all(ii) = 0;
     else
         last_valid = idx_valid(end);
         if last_valid < length(V_scan)
-            % 선형 보간으로 정밀화
-            V1 = V_scan(last_valid);
-            V2 = V_scan(last_valid + 1);
-            T1 = T_surplus(last_valid);
-            T2 = T_surplus(last_valid + 1);
+            V1 = V_scan(last_valid);   V2 = V_scan(last_valid+1);
+            T1 = T_surplus(last_valid); T2 = T_surplus(last_valid+1);
             if T2 < T1
-                V_max_all(ii) = V1 + (V2 - V1) * T1 / (T1 - T2);
+                V_max_all(ii) = V1 + (V2-V1)*T1/(T1-T2);
             else
                 V_max_all(ii) = V_scan(last_valid);
             end
         else
             V_max_all(ii) = V_scan(last_valid);
         end
-        % 최대속도에서 전력 기록
-        P_ff_all(ii) = P_ff_scan(last_valid);
-        alpha_opt(ii) = atan2(0.5 * Cd_frame * rho * V_max_all(ii)^2 * ...
-            (Stop * sin(0.1) + Sfront * cos(0.1)), W_N);
+        P_ff_all(ii)  = P_ff_scan(last_valid);
+        alpha_opt(ii) = atan2(0.5*Cd_frame*rho*V_max_all(ii)^2 * ...
+            (Stop*sin(0.1)+Sfront*cos(0.1)), W_N);
+    end
+
+    % ── [B안] 왕복 시간 점수 계산 ────────────────────────────────────────
+    % V=0 에서의 여유추력 (수직 방향) = 기동 가속력의 원천
+    %   T_surplus_hover = N_rotors * T_max(V=0) - W
+    %   T_max(V=0) = CT_axial(beta,0) * rho * n_lim^2 * D^4  (입사각 수정 불필요)
+    %
+    % 전진 방향 최대 가속도 (기체 경사):
+    %   α_max = acos(W / T_total_max)
+    %   a_max = T_total_max * sin(α_max) / mass = sqrt(T_total_max^2 - W_N^2) / mass
+    %
+    % 왕복 코스(L_course m) 편도 최소 시간 (삼각형 속도 프로파일):
+    %   t_one = 2 * sqrt(L_course / a_max)
+    %   10회 왕복 = 20 편도 → t_lap = 20 * t_one
+    n_lim_ii     = propList_considered{ii,6} / 60;   % 제조사 RPM 한계 [Hz]
+    D_ii         = propList_considered{ii,3} * IN2M;
+    beta_ii      = propList_considered{ii,4} / propList_considered{ii,3};
+    CT0_hover_ii = CT_axial(beta_ii, 0);
+    CT0_hover_ii = max(CT0_hover_ii, 0);
+
+    T_max_total_ii = CT0_hover_ii * rho * n_lim_ii^2 * D_ii^4 * RotorNo;
+    T_surplus_hover_all(ii) = T_max_total_ii - W_N;   % [N]
+
+    if T_max_total_ii > W_N
+        a_max_ii     = sqrt(max(T_max_total_ii^2 - W_N^2, 0)) / (mass_Total*1e-3);
+        t_one_ii     = 2 * sqrt(L_course / max(a_max_ii, 1e-6));
+        t_lap_all(ii) = 20 * t_one_ii;   % 10회 왕복 [s]
+    else
+        t_lap_all(ii) = inf;   % 호버 추력도 부족 → 비행 불가
     end
 end % prop loop
 
 %% ── [결과 출력] ─────────────────────────────────────────────────────────
-fprintf('\n%-22s %8s %6s %6s %10s\n', 'Propeller', 'D(in)', 'pitch', 'beta', 'Vmax(m/s)');
-fprintf('%s\n', repmat('-',1,60));
+fprintf('\n%-22s %6s %6s %6s %10s %14s %12s\n', ...
+    'Propeller', 'D(in)', 'pitch', 'beta', 'Vmax(m/s)', 'T_surplus(N)', 't_10lap(s)');
+fprintf('%s\n', repmat('-',1,80));
 for ii = 1:consideredNo
     beta_i = propList_considered{ii,4} / propList_considered{ii,3};
-    fprintf('%-22s %8.1f %6.1f %6.3f %10.2f\n', ...
+    fprintf('%-22s %6.1f %6.1f %6.3f %10.2f %14.2f %12.1f\n', ...
         propList_considered{ii,1}, ...
         propList_considered{ii,3}, ...
         propList_considered{ii,4}, ...
-        beta_i, V_max_all(ii));
+        beta_i, V_max_all(ii), T_surplus_hover_all(ii), t_lap_all(ii));
 end
 
-%% ── [최적 prop 선정 - 최대속도 최대화] ──────────────────────────────────
-[V_max_best, idx_ff_best] = max(V_max_all);
-
-if isnan(V_max_best) || V_max_best == 0
-    error('전진비행 가능한 prop 후보가 없습니다. 파라미터를 확인하십시오.');
+%% ── [최적 prop 선정 - B안: 왕복 시간 최소화] ────────────────────────────
+% 기준: t_lap_all 최소 (= T_surplus_hover 최대 = 가속도 최대)
+% 단, V_max > 0 인 prop만 대상 (전진비행 가능 확인)
+valid_mask = V_max_all > 0 & ~isinf(t_lap_all) & ~isnan(t_lap_all);
+if ~any(valid_mask)
+    error('전진비행 가능한 prop 후보가 없습니다.');
 end
 
-prop_ff = propList_considered(idx_ff_best, :);
-beta_ff = prop_ff{4} / prop_ff{3};
-D_ff    = prop_ff{3} * IN2M;
+t_lap_filtered = t_lap_all;
+t_lap_filtered(~valid_mask) = inf;
+[t_lap_best, idx_ff_best] = min(t_lap_filtered);
 
-fprintf('\n 선정 Prop: %s\n', prop_ff{1});
+V_max_best = V_max_all(idx_ff_best);
+prop_ff    = propList_considered(idx_ff_best, :);
+beta_ff    = prop_ff{4} / prop_ff{3};
+D_ff       = prop_ff{3} * IN2M;
+
+fprintf('\n [설계 2안] 선정 Prop: %s\n', prop_ff{1});
 fprintf('  직경 %.1fin / 피치 %.1fin / β=%.3f\n', prop_ff{3}, prop_ff{4}, beta_ff);
-fprintf('  예측 최대 전진속도: %.2f m/s (%.1f km/h)\n', V_max_best, V_max_best*3.6);
+fprintf('  여유추력 T_surplus : %.2f N\n', T_surplus_hover_all(idx_ff_best));
+fprintf('  최대 전진속도     : %.2f m/s (%.1f km/h)\n', V_max_best, V_max_best*3.6);
+fprintf('  10회 왕복 추정    : %.1f 초  (L=%.1fm 기준)\n', t_lap_best, L_course);
 
 %% ── [전진비행 운용점 계산] ──────────────────────────────────────────────
 % 최대속도에서의 α, 필요 추력, RPM 계산
@@ -275,7 +312,7 @@ fprintf('  로터 1개 토크     : %.4f Nm\n', Torque_ff);
 
 %% ── [2안 모터 선정] ─────────────────────────────────────────────────────
 % 전진비행 운용점을 기준으로 모터 필터링
-fprintf('\n[모터 선정 중...]\n');
+fprintf('\n[2안 모터 선정 중...]\n');
 
 % ── 운용점 정리 ──────────────────────────────────────────────────────────
 % 호버 운용점 (main.m에서 이미 계산됨)
@@ -336,7 +373,7 @@ else
     [~, idx_motor_ff] = min([motorList_ff{:,8}]);
     motorChosen_ff = motorList_ff(idx_motor_ff,:);
 
-    fprintf('\n 선정 Motor: %s  (%d KV)\n', ...
+    fprintf('\n [설계 2안] 선정 Motor: %s  (%d KV)\n', ...
         motorChosen_ff{2}, round(motorChosen_ff{5}/10)*10);
     fprintf('  허용전류 : %.0f A  /  질량 : %.0f g\n', motorChosen_ff{3}, motorChosen_ff{4});
     fprintf('  전진비행 소비전력 : %.0f W  /  효율 : %.1f %%\n', ...
@@ -359,7 +396,7 @@ else
     if isempty(best_esc_ff)
         fprintf('[경고] ESC 리스트에 조건 만족하는 제품이 없습니다. (요구 %.1f A)\n', req_current_ff);
     else
-        fprintf('\n 선정 ESC: %s  (허용 %dA, %.1fg)\n', ...
+        fprintf('\n [설계 2안] 선정 ESC: %s  (허용 %dA, %.1fg)\n', ...
             best_esc_ff{2}, best_esc_ff{3}, best_esc_ff{4});
     end
 
@@ -394,7 +431,7 @@ end
 % 선정된 prop과 1안 prop을 비교 시각화
 prop1_pos = temp_propChosen_pos;   % 1안 prop 위치
 
-figure('Name', '전진비행 여유추력 곡선', 'Position', [100 100 900 550]);
+figure('Name', '[설계 2안] 전진비행 여유추력 곡선', 'Position', [100 100 900 550]);
 hold on;
 colors = lines(3);
 
@@ -437,7 +474,7 @@ end
 yline(0, 'k:', 'LineWidth', 1.5, 'DisplayName', '여유추력=0 (Vmax 한계)');
 xlabel('전진 속도 V [m/s]', 'FontSize', 12);
 ylabel('여유 추력 [g]', 'FontSize', 12);
-title('전진속도 vs 여유추력 (RPM 한계 기준)', 'FontSize', 13);
+title('[설계 2안] 전진속도 vs 여유추력 (RPM 한계 기준)', 'FontSize', 13);
 legend('Location', 'southwest', 'FontSize', 10);
 grid on;
 xlim([0, max(V_scan)]);

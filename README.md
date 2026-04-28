@@ -14,6 +14,7 @@ Folders are named by course code (e.g. `ASE3102`).
 | `ase2010` | 응용선형대수 |
 | `ase3001` | 수치해석프로젝트 |
 | `ase3031` | 확률 및 랜덤변수 |
+| `ase3061` | 비행역학 |
 | `ase3072` | 고속공기역학 |
 | `ase3080` | 우주비행역학 |
 | `ase3093` | 자동제어 |
@@ -22,7 +23,7 @@ Folders are named by course code (e.g. `ASE3102`).
 | `ase4122` | 항공우주종합설계 |
 | `ase4124` | 비행동역학 및 제어 |
 | `ase7030` | 컨벡스최적화 |
-
+| `aus3113` | 자율비행실습 |
 
 ---
 

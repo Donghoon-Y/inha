@@ -1,0 +1,8 @@
+clc; clear all;
+
+data = readmatrix("ref_sunpointing_log.csv");
+
+t = (1:length(data)-1);
+cvs1_data = data(1: 2);
+
+plot(t, data(1:,2))

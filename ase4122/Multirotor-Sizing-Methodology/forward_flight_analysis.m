@@ -600,3 +600,134 @@ xlim([0, max(V_scan)]);
 fprintf('\n[완료] forward_flight_analysis.m 실행 완료\n');
 fprintf('  → mass_Total_ff = %.1f g 가 workspace에 저장됨\n', mass_Total_ff);
 fprintf('  → ground_effect_analysis.m / arm_wake_analysis.m 에서 이 값을 사용하세요.\n');
+
+%% =========================================================================
+%% 그래프 2: 후보 프롭 전체 비교 산점도
+%%   aero_analysis의 비추력 산점도와 같은 방식으로,
+%%   기동성 지표(t_lap, V_max, T_surplus)를 축으로 삼아
+%%   2안 선정 프롭이 왜 1등인지 한눈에 보여줌.
+%% =========================================================================
+
+% --- 유효 후보만 추려서 라벨 준비 ---
+valid_idx   = find(~isinf(t_lap_all) & ~isnan(t_lap_all) & V_max_all > 0);
+t_lap_valid = t_lap_all(valid_idx);
+Vmax_valid  = V_max_all(valid_idx);
+Tsur_valid  = T_surplus_hover_all(valid_idx);   % 호버 여유추력 [N]
+
+% 각 후보의 직경·피치
+diam_valid  = cellfun(@(x) x, propList_considered(valid_idx, 3));
+pitch_valid = cellfun(@(x) x, propList_considered(valid_idx, 4));
+beta_valid  = pitch_valid ./ diam_valid;
+
+% 선정 프롭 위치 (valid_idx 내에서)
+[~, loc_ff]   = ismember(idx_ff_best,         valid_idx);
+[~, loc_plan1] = ismember(temp_propChosen_pos, valid_idx);
+
+% --- 색상 팔레트 ---
+clr_candidate = [0.65 0.75 0.88];   % 연파랑: 일반 후보
+clr_plan1     = [0.20 0.50 0.20];   % 녹색: 1안 선정 프롭
+clr_plan2     = [0.80 0.15 0.15];   % 적색: 2안 선정 프롭
+
+%% ---- Figure 2: t_lap vs V_max 산점도 (기동성 선정 근거) ----
+figure('Name', '[설계 2안] 기동성 후보 비교: t_lap vs Vmax', ...
+       'Position', [150 150 860 520]);
+hold on;
+
+% 일반 후보
+scatter(Vmax_valid, t_lap_valid, 70, clr_candidate, 'filled', ...
+    'DisplayName', '후보 프롭');
+
+% 후보 이름 라벨 (겹침 방지를 위해 offset 적용)
+for kk = 1:length(valid_idx)
+    ii  = valid_idx(kk);
+    lbl = propList_considered{ii,1};
+    % 선정 프롭 라벨은 나중에 따로 붙임
+    if ii == idx_ff_best || ii == temp_propChosen_pos, continue; end
+    text(Vmax_valid(kk) + 0.3, t_lap_valid(kk), lbl, ...
+        'FontSize', 7, 'Color', [0.4 0.4 0.4], ...
+        'VerticalAlignment', 'middle');
+end
+
+% 1안 선정 프롭
+if loc_plan1 > 0
+    scatter(Vmax_valid(loc_plan1), t_lap_valid(loc_plan1), 160, ...
+        clr_plan1, 'filled', ...
+        'DisplayName', sprintf('1안: %s', propSpecification{1}));
+    text(Vmax_valid(loc_plan1) + 0.3, t_lap_valid(loc_plan1), ...
+        ['1안: ' propSpecification{1}], ...
+        'FontSize', 9, 'Color', clr_plan1, 'FontWeight', 'bold');
+end
+
+% 2안 선정 프롭
+if loc_ff > 0
+    scatter(Vmax_valid(loc_ff), t_lap_valid(loc_ff), 200, ...
+        clr_plan2, 'filled', ...
+        'DisplayName', sprintf('2안 선정: %s', prop_ff{1}));
+    text(Vmax_valid(loc_ff) + 0.3, t_lap_valid(loc_ff), ...
+        ['2안: ' prop_ff{1}], ...
+        'FontSize', 9, 'Color', clr_plan2, 'FontWeight', 'bold');
+end
+
+% t_lap 최소 기준선 (선정값)
+yline(t_lap_best, '--', 'Color', clr_plan2, 'LineWidth', 1.2, ...
+    'Label', sprintf('t_{lap,min} = %.1fs', t_lap_best), ...
+    'LabelHorizontalAlignment', 'left', 'FontSize', 9);
+
+xlabel('최대 전진속도 V_{max} [m/s]', 'FontSize', 12);
+ylabel('10회 왕복 추정 시간 t_{lap} [s]  (낮을수록 좋음)', 'FontSize', 12);
+title(sprintf('[설계 2안] 후보 프롭 기동성 비교 — t_{lap} vs V_{max}\n(mass = %.0f g, 수렴 후 기준)', ...
+    mass_Total_ff), 'FontSize', 12, 'FontWeight', 'normal');
+legend('Location', 'northeast', 'FontSize', 10);
+grid on; box off;
+set(gca, 'YDir', 'reverse');   % t_lap 낮을수록 위 (좋은 방향이 위)
+hold off;
+
+%% ---- Figure 3: T_surplus(호버 여유추력) vs t_lap 산점도 ----
+% T_surplus가 클수록 가속력이 크고 t_lap이 작아지는 관계를 보여줌
+figure('Name', '[설계 2안] 기동성 후보 비교: T_surplus vs t_lap', ...
+       'Position', [200 200 860 520]);
+hold on;
+
+Tsur_g = Tsur_valid * 1000 / g_acc;   % N → g
+
+scatter(Tsur_g, t_lap_valid, 70, clr_candidate, 'filled', ...
+    'DisplayName', '후보 프롭');
+
+for kk = 1:length(valid_idx)
+    ii = valid_idx(kk);
+    if ii == idx_ff_best || ii == temp_propChosen_pos, continue; end
+    text(Tsur_g(kk) + 5, t_lap_valid(kk), propList_considered{ii,1}, ...
+        'FontSize', 7, 'Color', [0.4 0.4 0.4], ...
+        'VerticalAlignment', 'middle');
+end
+
+if loc_plan1 > 0
+    scatter(Tsur_g(loc_plan1), t_lap_valid(loc_plan1), 160, ...
+        clr_plan1, 'filled', ...
+        'DisplayName', sprintf('1안: %s', propSpecification{1}));
+    text(Tsur_g(loc_plan1) + 5, t_lap_valid(loc_plan1), ...
+        ['1안: ' propSpecification{1}], ...
+        'FontSize', 9, 'Color', clr_plan1, 'FontWeight', 'bold');
+end
+
+if loc_ff > 0
+    scatter(Tsur_g(loc_ff), t_lap_valid(loc_ff), 200, ...
+        clr_plan2, 'filled', ...
+        'DisplayName', sprintf('2안 선정: %s', prop_ff{1}));
+    text(Tsur_g(loc_ff) + 5, t_lap_valid(loc_ff), ...
+        ['2안: ' prop_ff{1}], ...
+        'FontSize', 9, 'Color', clr_plan2, 'FontWeight', 'bold');
+end
+
+yline(t_lap_best, '--', 'Color', clr_plan2, 'LineWidth', 1.2, ...
+    'Label', sprintf('t_{lap,min} = %.1fs', t_lap_best), ...
+    'LabelHorizontalAlignment', 'left', 'FontSize', 9);
+
+xlabel('호버 여유추력 T_{surplus} [g]  (클수록 가속력 우수)', 'FontSize', 12);
+ylabel('10회 왕복 추정 시간 t_{lap} [s]  (낮을수록 좋음)', 'FontSize', 12);
+title(sprintf('[설계 2안] 후보 프롭 기동성 비교 — T_{surplus} vs t_{lap}\n(2안 선정: T_{surplus} 최대 → t_{lap} 최소)' ...
+    ), 'FontSize', 12, 'FontWeight', 'normal');
+legend('Location', 'northeast', 'FontSize', 10);
+grid on; box off;
+set(gca, 'YDir', 'reverse');
+hold off;

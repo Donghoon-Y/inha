@@ -9,6 +9,12 @@
 %   main.m의 호버 후보 prop(propList_considered) 중에서
 %   전진비행 최대속도를 최대화하는 prop / motor / ESC 를 선정합니다.
 %
+% [수정] 질량 수렴 루프 추가:
+%   2안에서 선정된 motor/ESC/prop 무게가 1안과 다를 수 있으므로
+%   mass_Total_ff 를 반복 갱신하여 W_N(기체 중량)을 수렴시킴.
+%   수렴 완료 후 downstream 해석(ground_effect, arm_wake)을 위해
+%   mass_Total_ff 를 workspace 에 저장함.
+%
 % 적용 이론 - Pollet et al., ICAS 2020:
 %   1. 전진비행 힘 평형 (Eq. 3a/3b)
 %   2. 비축 입사각에서 CT, CP 수정 (Leng et al. 모델, Eq. 8-9)
@@ -18,30 +24,35 @@
 % 참조하는 Workspace 변수 (main.m 출력):
 %   필수:
 %     propList_considered, operatingPoints, consideredNo
-%     mass_Total        — 실측 부품 기반 이륙 중량 [g] (W_N 계산에 사용)
-%     thrustHover_Est   — 로터당 호버 추력 [g] (mass_Total_Est 기반)
+%     mass_Total        — 실측 부품 기반 이륙 중량 [g]
+%     mass_Motor_Est    — 모터 질량 상한 초기값 [g]
+%     thrustHover_Est   — 로터당 호버 추력 [g]
 %     RotorNo, SafetyFactor
 %     BattCellNo, BattCellVoltage
+%     BattCapacity, BattPeukertConstant, BattHourRating, BattVoltageSagConstant
 %     propSpecification — 1안 프롭 사양 (비교 출력용)
 %     motorChosen       — 1안 모터 (비교 출력용)
 %     time_hover        — 1안 호버 비행시간 (비교 출력용)
 %     best_esc          — 1안 ESC (비교 출력용)
-%     mass_Motor_Est    — 모터 질량 상한 초기값 [g]
+%     temp_propChosen_pos — propList_considered 내 1안 프롭 인덱스
 %
 % 이 파일이 생성하는 Workspace 변수 (downstream 파일 참조):
-%   prop_ff        — 선정 프롭 데이터 (1×6 cell), ground_effect / arm_wake 참조
+%   prop_ff        — 선정 프롭 데이터 (1×6 cell)
 %   idx_ff_best    — 선정 프롭 인덱스 (propList_considered 기준)
 %   V_max_best     — 최대 전진속도 [m/s]
 %   V_ff           — 운용 전진속도 (0.95 * V_max_best) [m/s]
 %   motorChosen_ff — 2안 선정 모터 (1×12 cell)
 %   best_esc_ff    — 2안 선정 ESC
+%   mass_Total_ff  — 2안 수렴 후 최종 기체 질량 [g]  ★ NEW
 % =========================================================================
 
 %% 사전 확인: 필요 변수 존재 여부
 required_vars = {'propList_considered', 'operatingPoints', 'consideredNo', ...
                  'mass_Total', 'thrustHover_Est', 'RotorNo', 'SafetyFactor', ...
                  'BattCellNo', 'BattCellVoltage', 'propSpecification', ...
-                 'motorChosen', 'time_hover', 'best_esc', 'mass_Motor_Est'};
+                 'motorChosen', 'time_hover', 'best_esc', 'mass_Motor_Est', ...
+                 'BattCapacity', 'BattPeukertConstant', 'BattHourRating', ...
+                 'BattVoltageSagConstant', 'temp_propChosen_pos'};
 missing = {};
 for v = required_vars
     if ~exist(v{1}, 'var'), missing{end+1} = v{1}; end
@@ -57,31 +68,16 @@ g_acc = 9.81;    % 중력가속도 [m/s²]
 IN2M  = 0.0254;  % inch → m
 
 %% 기체 파라미터
-% W_N: mass_Total(실측 보정값) 기반. thrustHover_Est(mass_Total_Est 기반)와
-% 구분하여 사용. 전진비행 힘 평형에는 실측 중량을 써야 정확함.
-W_N = mass_Total * 1e-3 * g_acc;   % 기체 중량 [N]
-
-% 기체 항력 계수 — 기본값 1.0 (Pollet 논문 Table 3)
-%   유선형 기체: ~0.4~0.6 / 일반 쿼드콥터: ~0.8~1.2
-Cd_frame = 1.0;
-
-% S500 프레임 실측 투영 면적
-% S500 스펙: 휠베이스 500mm, 암 220×40mm × 4개, 중앙판 170×140mm
-%            랜딩기어 파이프 φ16mm × 200mm × 2개
-% Stop  (상면 투영): 암 4개 + 중앙판 = ~0.059 m²
-% Sfront(정면 투영): 중앙판 정면 + 앞암 2개 + 랜딩기어 = ~0.021 m²
-% DJI 스케일링 법칙은 밀폐형 기체 기준이므로 S500 오픈 프레임에는 직접 측정값 사용
+Cd_frame = 1.0;   % 기체 항력 계수 (S500 오픈 프레임 기준)
 Stop   = 0.059;   % m²  (S500 상면 투영)
 Sfront = 0.021;   % m²  (S500 정면 투영, 랜딩기어 포함)
 
 fprintf('\n======= [설계 2안] 전진비행 기동성 최적화 =======\n');
-fprintf('기체 중량     : %.1f g  (%.3f N)\n', mass_Total, W_N);
 fprintf('Cd_frame      : %.2f\n', Cd_frame);
 fprintf('Stop / Sfront : %.4f m² / %.4f m²\n', Stop, Sfront);
 fprintf('호버 후보 프롭 수 : %d 개\n', consideredNo);
 
-%% 전진비행 CT/CP 모델 - Pollet Eq. 8
-% APC 프롭 데이터 회귀 다항식 (β = pitch/diameter 비)
+%% CT/CP 모델 함수 정의 (Pollet Eq. 8 - APC 회귀 다항식)
 CT_axial = @(beta, Ja) ...
     0.02791 - 0.06543*Ja + 0.11867*beta + 0.27334*beta^2 - 0.28852*beta^3 ...
     + 0.02104*Ja^3 - 0.23504*Ja^2 + 0.18677*beta*Ja^2;
@@ -90,9 +86,7 @@ CP_axial = @(beta, Ja) ...
     0.01813 - 0.06218*beta + 0.00343*Ja + 0.35712*beta^2 - 0.23774*beta^3 ...
     + 0.07549*beta*Ja - 0.1235*Ja^2;
 
-%% 비축 입사각 수정 - Leng et al., Pollet Eq. 9
-% J0T, J0P : CT=0, CP=0 이 되는 J_axial
-% eta_T, eta_P : 입사각 α 에서의 CT/CP 수정 비율
+%% 비축 입사각 수정 함수 (Leng et al., Pollet Eq. 9)
 find_J0 = @(beta, coeff_fn) ...
     fzero(@(Ja) coeff_fn(beta, max(Ja,0)), [0.01, 2.0]);
 
@@ -104,270 +98,392 @@ eta_P = @(alpha, J, beta) ...
     1 + ((J * cos(alpha) / (pi * 0.75))^2) / ...
         (2 * (1 - J*sin(alpha) / max(find_J0(beta, CP_axial), 1e-6)));
 
-%% 각 prop별 최대 전진속도 계산
-V_max_all           = nan(consideredNo, 1);
-alpha_opt           = nan(consideredNo, 1);
-P_ff_all            = nan(consideredNo, 1);
-T_ff_all            = nan(consideredNo, 1);
-T_surplus_hover_all = nan(consideredNo, 1);
-t_lap_all           = nan(consideredNo, 1);
-L_course            = 2.0;        % 왕복 코스 길이 [m]
+%% =========================================================================
+%  질량 수렴 루프 (OUTER LOOP)
+%
+%  수렴 변수: mass_Total_ff [g]
+%  - 초기값: mass_Total (1안 실측 기반)
+%  - 매 iter: 선정된 2안 motor/ESC 무게로 mass_Total_ff 갱신
+%  - 종료 조건: |Δmass| < 1g  또는 최대 10회
+%
+%  수렴 구조:
+%    iter 1: W_N = mass_Total 기반 → prop/motor/ESC 선정
+%    iter 2: W_N = (mass_Total - 1안부품 + 2안부품) 기반 → 재선정
+%    ...반복...
+%    수렴 시 mass_Total_ff 확정
+% =========================================================================
 
-V_scan = 0 : 0.5 : 70;   % 속도 스캔 범위 [m/s]
+MAX_OUTER_ITER = 10;
+CONV_TOL_G     = 1.0;   % 수렴 허용 오차 [g]
+V_scan         = 0 : 0.5 : 70;   % 속도 스캔 범위 [m/s]
+L_course       = 2.0;             % 왕복 코스 길이 [m]
 
-for ii = 1:consideredNo
-    D_m            = propList_considered{ii,3} * IN2M;
-    beta           = propList_considered{ii,4} / propList_considered{ii,3};
-    speedLimit_rpm = propList_considered{ii,6};
+% 1안 부품 무게 추출 (수렴 루프에서 질량 차이 계산에 사용)
+mass_motor_plan1 = motorChosen{4};   % 1안 모터 1개 질량 [g]
+mass_esc_plan1   = best_esc{4};      % 1안 ESC 1개 질량 [g]
 
-    T_surplus = zeros(size(V_scan));
-    P_ff_scan = zeros(size(V_scan));
+% prop 무게: propList_considered{ii,5} 에 있으면 사용, 없으면 0으로 처리
+% (propList 컬럼 구조에 따라 인덱스 확인 필요)
+has_prop_mass = (size(propList_considered, 2) >= 7);
+if has_prop_mass
+    mass_prop_plan1 = propSpecification{6};   % 1안 프롭 1개 질량 [g] (컬럼6 가정)
+else
+    mass_prop_plan1 = 0;
+end
 
-    % n_lim: RPM 한계 [Hz] — 여유추력과 소비전력 모두 이 기준으로 계산.
-    % 플롯 로직과 동일하게 항상 n_lim 기반으로 계산하여 수치와 그래프 일치.
-    n_lim = speedLimit_rpm / 60;
+% 초기 질량 설정
+mass_Total_ff = mass_Total;
 
-    for kk = 1:length(V_scan)
-        V = V_scan(kk);
+% 수렴 루프 외부에서 선언 (수렴 실패 시에도 변수 존재 보장)
+motorChosen_ff = {};
+best_esc_ff    = {};
+idx_ff_best    = 1;
+V_max_best     = 0;
+prop_ff        = propList_considered(1,:);
 
-        % 기체 경사각 α 수치 해석 (힘 평형, Pollet Eq. 4)
-        alpha_k = 0.1;
-        for iter = 1:20
-            Sref      = Stop * sin(alpha_k) + Sfront * cos(alpha_k);
-            Df        = 0.5 * Cd_frame * rho * V^2 * Sref;
-            alpha_new = atan2(Df, W_N);
-            if abs(alpha_new - alpha_k) < 1e-5, break; end
-            alpha_k = alpha_new;
+fprintf('\n--- 질량 수렴 루프 시작 ---\n');
+fprintf('%-6s  %10s  %10s  %10s\n', 'Iter', 'mass_ff[g]', 'Δmass[g]', '선정Prop');
+
+for outer_iter = 1:MAX_OUTER_ITER
+
+    % ---------------------------------------------------------------
+    % 현재 질량 기반 W_N 갱신
+    % ---------------------------------------------------------------
+    W_N = mass_Total_ff * 1e-3 * g_acc;   % 기체 중량 [N]
+
+    % ---------------------------------------------------------------
+    % 각 prop별 최대 전진속도 및 기동 성능 계산
+    % ---------------------------------------------------------------
+    V_max_all           = nan(consideredNo, 1);
+    P_ff_all            = nan(consideredNo, 1);
+    T_surplus_hover_all = nan(consideredNo, 1);
+    t_lap_all           = nan(consideredNo, 1);
+
+    for ii = 1:consideredNo
+        D_m            = propList_considered{ii,3} * IN2M;
+        beta           = propList_considered{ii,4} / propList_considered{ii,3};
+        speedLimit_rpm = propList_considered{ii,6};
+        n_lim          = speedLimit_rpm / 60;   % [Hz]
+
+        T_surplus = zeros(size(V_scan));
+        P_ff_scan = zeros(size(V_scan));
+
+        for kk = 1:length(V_scan)
+            V = V_scan(kk);
+
+            % 기체 경사각 α 수치 해석 (힘 평형, Pollet Eq. 4)
+            alpha_k = 0.1;
+            for iter = 1:20
+                Sref      = Stop * sin(alpha_k) + Sfront * cos(alpha_k);
+                Df        = 0.5 * Cd_frame * rho * V^2 * Sref;
+                alpha_new = atan2(Df, W_N);
+                if abs(alpha_new - alpha_k) < 1e-5, break; end
+                alpha_k = alpha_new;
+            end
+            alpha_k = max(alpha_k, 0);
+
+            % 총 필요 추력 및 로터 1개 추력
+            T_total_N = sqrt(W_N^2 + Df^2);
+            T_one_N   = T_total_N / RotorNo;
+
+            % n_lim 기준 Ja, CT, eta 계산
+            J_lim  = V / (n_lim * D_m);
+            Ja_lim = max(V * sin(alpha_k) / (n_lim * D_m), 0);
+
+            CT0 = max(CT_axial(beta, Ja_lim), 0);
+            if CT0 <= 0
+                T_surplus(kk) = -inf;
+                continue
+            end
+
+            try, etaT = eta_T(alpha_k, J_lim, beta); catch, etaT = 1; end
+            etaT = max(min(etaT, 3), 0.1);
+
+            T_max_N       = CT0 * etaT * rho * n_lim^2 * D_m^4;
+            T_surplus(kk) = T_max_N - T_one_N;
+
+            % 소비 전력 (필요 추력 기준 RPM)
+            CT_ff = CT0 * etaT;
+            if CT_ff > 0 && T_one_N > 0
+                n_req = sqrt(T_one_N / (CT_ff * rho * D_m^4));
+                CP0   = CP_axial(beta, max(V * sin(alpha_k) / (n_req * D_m), 0));
+                try, etaP = eta_P(alpha_k, V/(n_req*D_m), beta); catch, etaP = 1; end
+                etaP = max(min(etaP, 3), 0.1);
+                P_ff_scan(kk) = max(CP0 * etaP * rho * n_req^3 * D_m^5, 0);
+            end
         end
-        alpha_k = max(alpha_k, 0);
 
-        % 총 필요 추력
-        T_total_N = sqrt(W_N^2 + Df^2);
-        T_one_N   = T_total_N / RotorNo;
-
-        % n_lim 기준 Ja, CT, eta 계산 (플롯 로직과 동일)
-        J_lim  = V / (n_lim * D_m);
-        Ja_lim = max(V * sin(alpha_k) / (n_lim * D_m), 0);
-
-        CT0 = max(CT_axial(beta, Ja_lim), 0);
-        if CT0 <= 0
-            T_surplus(kk) = -inf;
-            continue
-        end
-
-        try, etaT = eta_T(alpha_k, J_lim, beta); catch, etaT = 1; end
-        etaT = max(min(etaT, 3), 0.1);
-
-        % RPM 한계에서 낼 수 있는 최대 추력
-        T_max_N       = CT0 * etaT * rho * n_lim^2 * D_m^4;
-        T_surplus(kk) = T_max_N - T_one_N;
-
-        % 소비 전력: 필요 추력을 낼 때의 RPM 기준으로 계산
-        CT_ff = CT0 * etaT;
-        if CT_ff > 0 && T_one_N > 0
-            n_req = sqrt(T_one_N / (CT_ff * rho * D_m^4));
-            CP0   = CP_axial(beta, max(V * sin(alpha_k) / (n_req * D_m), 0));
-            try, etaP = eta_P(alpha_k, V/(n_req*D_m), beta); catch, etaP = 1; end
-            etaP = max(min(etaP, 3), 0.1);
-            P_ff_scan(kk) = max(CP0 * etaP * rho * n_req^3 * D_m^5, 0);
-        end
-    end
-
-    % 최대 전진속도 계산
-    idx_valid = find(T_surplus > 0);
-    if isempty(idx_valid)
-        V_max_all(ii) = 0;
-    else
-        last_valid = idx_valid(end);
-        if last_valid < length(V_scan)
-            V1 = V_scan(last_valid);   V2 = V_scan(last_valid+1);
-            T1 = T_surplus(last_valid); T2 = T_surplus(last_valid+1);
-            if T2 < T1
-                V_max_all(ii) = V1 + (V2-V1)*T1/(T1-T2);
+        % 최대 전진속도 계산
+        idx_valid = find(T_surplus > 0);
+        if isempty(idx_valid)
+            V_max_all(ii) = 0;
+        else
+            last_valid = idx_valid(end);
+            if last_valid < length(V_scan)
+                V1 = V_scan(last_valid);   V2 = V_scan(last_valid+1);
+                T1 = T_surplus(last_valid); T2 = T_surplus(last_valid+1);
+                if T2 < T1
+                    V_max_all(ii) = V1 + (V2-V1)*T1/(T1-T2);
+                else
+                    V_max_all(ii) = V_scan(last_valid);
+                end
             else
                 V_max_all(ii) = V_scan(last_valid);
             end
-        else
-            V_max_all(ii) = V_scan(last_valid);
+            P_ff_all(ii) = P_ff_scan(last_valid);
         end
-        P_ff_all(ii)  = P_ff_scan(last_valid);
-        alpha_opt(ii) = atan2(0.5*Cd_frame*rho*V_max_all(ii)^2 * ...
-            (Stop*sin(0.1)+Sfront*cos(0.1)), W_N);
+
+        % 왕복 시간 점수 계산 (삼각형 속도 프로파일 가정)
+        n_lim_ii     = propList_considered{ii,6} / 60;
+        D_ii         = propList_considered{ii,3} * IN2M;
+        beta_ii      = propList_considered{ii,4} / propList_considered{ii,3};
+        CT0_hover_ii = max(CT_axial(beta_ii, 0), 0);
+
+        T_max_total_ii          = CT0_hover_ii * rho * n_lim_ii^2 * D_ii^4 * RotorNo;
+        T_surplus_hover_all(ii) = T_max_total_ii - W_N;
+
+        if T_max_total_ii > W_N
+            a_max_ii      = sqrt(max(T_max_total_ii^2 - W_N^2, 0)) / (mass_Total_ff*1e-3);
+            t_one_ii      = 2 * sqrt(L_course / max(a_max_ii, 1e-6));
+            t_lap_all(ii) = 20 * t_one_ii;
+        else
+            t_lap_all(ii) = inf;
+        end
     end
 
-    % 왕복 시간 점수 계산
-    % V=0 여유추력 = 기동 가속력의 원천
-    %   T_max(V=0) = CT_axial(beta,0) * rho * n_lim^2 * D^4  (입사각 수정 불필요)
-    %   a_max = sqrt(T_total_max^2 - W_N^2) / mass
-    %   t_one = 2 * sqrt(L_course / a_max)   (삼각형 속도 프로파일)
-    %   10회 왕복 = 20 편도 → t_lap = 20 * t_one
-    n_lim_ii     = propList_considered{ii,6} / 60;
-    D_ii         = propList_considered{ii,3} * IN2M;
-    beta_ii      = propList_considered{ii,4} / propList_considered{ii,3};
-    CT0_hover_ii = max(CT_axial(beta_ii, 0), 0);
+    % ---------------------------------------------------------------
+    % 최적 prop 선정 (왕복 시간 최소화)
+    % ---------------------------------------------------------------
+    valid_mask = V_max_all > 0 & ~isinf(t_lap_all) & ~isnan(t_lap_all);
+    if ~any(valid_mask)
+        error('전진비행 가능한 prop 후보가 없습니다. (outer_iter=%d)', outer_iter);
+    end
 
-    T_max_total_ii          = CT0_hover_ii * rho * n_lim_ii^2 * D_ii^4 * RotorNo;
-    T_surplus_hover_all(ii) = T_max_total_ii - W_N;
+    t_lap_filtered = t_lap_all;
+    t_lap_filtered(~valid_mask) = inf;
+    [t_lap_best, idx_ff_best_cur] = min(t_lap_filtered);
 
-    if T_max_total_ii > W_N
-        a_max_ii      = sqrt(max(T_max_total_ii^2 - W_N^2, 0)) / (mass_Total*1e-3);
-        t_one_ii      = 2 * sqrt(L_course / max(a_max_ii, 1e-6));
-        t_lap_all(ii) = 20 * t_one_ii;
+    V_max_best_cur = V_max_all(idx_ff_best_cur);
+    prop_ff_cur    = propList_considered(idx_ff_best_cur, :);
+    beta_ff_cur    = prop_ff_cur{4} / prop_ff_cur{3};
+    D_ff_cur       = prop_ff_cur{3} * IN2M;
+
+    % ---------------------------------------------------------------
+    % 전진비행 운용점 계산 (V_ff = 0.95 * V_max)
+    % ---------------------------------------------------------------
+    V_ff_cur = V_max_best_cur * 0.95;
+
+    alpha_ff = 0.1;
+    for iter = 1:30
+        Sref     = Stop * sin(alpha_ff) + Sfront * cos(alpha_ff);
+        Df_ff    = 0.5 * Cd_frame * rho * V_ff_cur^2 * Sref;
+        alpha_ff = atan2(Df_ff, W_N);
+    end
+    Sref_ff    = Stop * sin(alpha_ff) + Sfront * cos(alpha_ff);
+    Df_ff      = 0.5 * Cd_frame * rho * V_ff_cur^2 * Sref_ff;
+    T_total_ff = sqrt(W_N^2 + Df_ff^2);
+    T_one_ff   = T_total_ff / RotorNo;
+
+    % RPM 수렴 (n_lim 초기값)
+    n_lim_ff = propList_considered{idx_ff_best_cur,6} / 60;
+    n_req_ff  = n_lim_ff;
+
+    for conv_iter = 1:30
+        Ja_ff_iter = max(V_ff_cur * sin(alpha_ff) / (n_req_ff * D_ff_cur), 0);
+        J_ff_iter  = V_ff_cur / (n_req_ff * D_ff_cur);
+        CT0_ff     = max(CT_axial(beta_ff_cur, Ja_ff_iter), 0);
+        try, etaT_ff = eta_T(alpha_ff, J_ff_iter, beta_ff_cur); catch, etaT_ff = 1; end
+        etaT_ff   = max(min(etaT_ff, 3), 0.1);
+        CT_ff_val = CT0_ff * etaT_ff;
+        if CT_ff_val <= 0, break; end
+
+        n_new = sqrt(T_one_ff / (CT_ff_val * rho * D_ff_cur^4));
+        if abs(n_new - n_req_ff) / max(n_req_ff, 1e-6) < 1e-5, break; end
+        n_req_ff = n_new;
+    end
+    n_req_ff = min(n_req_ff, n_lim_ff);
+    RPM_ff   = n_req_ff * 60;
+
+    Ja_ff   = max(V_ff_cur * sin(alpha_ff) / (n_req_ff * D_ff_cur), 0);
+    J_ff    = V_ff_cur / (n_req_ff * D_ff_cur);
+    CP0_ff  = CP_axial(beta_ff_cur, Ja_ff);
+    try, etaP_ff = eta_P(alpha_ff, J_ff, beta_ff_cur); catch, etaP_ff = 1; end
+    etaP_ff  = max(min(etaP_ff, 3), 0.1);
+    P_one_ff = max(CP0_ff * etaP_ff * rho * n_req_ff^3 * D_ff_cur^5, 0);
+    Torque_ff = P_one_ff / (2*pi*max(n_req_ff, 1e-6));
+
+    % ---------------------------------------------------------------
+    % 2안 모터 선정
+    % ---------------------------------------------------------------
+    speedHover_ff  = operatingPoints{idx_ff_best_cur,1}(1);
+    torqueHover_ff = operatingPoints{idx_ff_best_cur,1}(3) * SafetyFactor;
+
+    speedMax_design  = max(speedHover_ff, RPM_ff) * SafetyFactor;
+    torqueMax_design = max(torqueHover_ff, Torque_ff * SafetyFactor);
+    spec_mass_ff     = mass_Motor_Est;
+
+    motorList_ff = load_motorList( ...
+        BattCellNo * BattCellVoltage, ...
+        speedMax_design, torqueMax_design, ...
+        speedHover_ff, torqueHover_ff, ...
+        spec_mass_ff);
+
+    % 질량 상한 단계적 완화
+    if isempty(motorList_ff)
+        for mass_relax = [150, 200, 999]
+            motorList_ff = load_motorList( ...
+                BattCellNo * BattCellVoltage, ...
+                speedMax_design, torqueMax_design, ...
+                speedHover_ff, torqueHover_ff, ...
+                mass_relax);
+            if ~isempty(motorList_ff), break; end
+        end
+    end
+
+    if isempty(motorList_ff)
+        warning('outer_iter %d: 조건 만족 모터 없음. 이전 결과 유지.', outer_iter);
+        break;
+    end
+
+    % 전진비행 전력 최소 모터 선정
+    [~, idx_motor_ff] = min([motorList_ff{:,8}]);
+    motorChosen_ff_cur = motorList_ff(idx_motor_ff,:);
+
+    % ---------------------------------------------------------------
+    % 2안 ESC 선정
+    % ---------------------------------------------------------------
+    esc_List_ff    = load_escList();
+    req_current_ff = ceil(motorChosen_ff_cur{7}) * 1.2;
+
+    best_esc_ff_cur = {};
+    min_mass_esc    = inf;
+    for i = 1:size(esc_List_ff,1)
+        if esc_List_ff{i,3} >= req_current_ff && esc_List_ff{i,4} < min_mass_esc
+            min_mass_esc    = esc_List_ff{i,4};
+            best_esc_ff_cur = esc_List_ff(i,:);
+        end
+    end
+
+    % ---------------------------------------------------------------
+    % prop 무게 (있으면 반영)
+    % ---------------------------------------------------------------
+    if has_prop_mass
+        mass_prop_ff_cur  = prop_ff_cur{6};
+        mass_prop_plan1_v = mass_prop_plan1;
     else
-        t_lap_all(ii) = inf;
+        mass_prop_ff_cur  = 0;
+        mass_prop_plan1_v = 0;
+    end
+
+    % ---------------------------------------------------------------
+    % 2안 기준 mass_Total 갱신
+    %   = mass_Total
+    %     - (1안 모터 × RotorNo) + (2안 모터 × RotorNo)
+    %     - (1안 ESC  × RotorNo) + (2안 ESC  × RotorNo)
+    %     - (1안 prop × RotorNo) + (2안 prop × RotorNo)
+    % ---------------------------------------------------------------
+    mass_motor_ff = motorChosen_ff_cur{4};   % 2안 모터 1개 [g]
+
+    if ~isempty(best_esc_ff_cur)
+        mass_esc_ff = best_esc_ff_cur{4};    % 2안 ESC 1개 [g]
+    else
+        mass_esc_ff = mass_esc_plan1;        % ESC 선정 실패 시 1안 값 유지
+    end
+
+    mass_Total_ff_new = mass_Total ...
+        + (mass_motor_ff   - mass_motor_plan1) * RotorNo ...
+        + (mass_esc_ff     - mass_esc_plan1  ) * RotorNo ...
+        + (mass_prop_ff_cur - mass_prop_plan1_v) * RotorNo;
+
+    delta_mass = abs(mass_Total_ff_new - mass_Total_ff);
+
+    fprintf('%-6d  %10.1f  %10.2f  %s\n', ...
+        outer_iter, mass_Total_ff_new, delta_mass, prop_ff_cur{1});
+
+    % 결과 저장 (수렴 여부와 무관하게 최신 결과 유지)
+    mass_Total_ff  = mass_Total_ff_new;
+    motorChosen_ff = motorChosen_ff_cur;
+    best_esc_ff    = best_esc_ff_cur;
+    idx_ff_best    = idx_ff_best_cur;
+    V_max_best     = V_max_best_cur;
+    prop_ff        = prop_ff_cur;
+    V_ff           = V_ff_cur;
+
+    % 수렴 판정
+    if delta_mass < CONV_TOL_G
+        fprintf('→ 수렴 완료 (iter=%d, Δmass=%.3fg)\n', outer_iter, delta_mass);
+        break;
+    end
+
+    if outer_iter == MAX_OUTER_ITER
+        fprintf('[경고] 최대 반복(%d회) 도달. 마지막 결과 사용.\n', MAX_OUTER_ITER);
     end
 end
 
-%% 결과 출력
-fprintf('\n%-22s %6s %6s %6s %10s %14s %12s\n', ...
-    'Propeller', 'D(in)', 'pitch', 'beta', 'Vmax(m/s)', 'T_surplus(N)', 't_10lap(s)');
-fprintf('%s\n', repmat('-',1,80));
-for ii = 1:consideredNo
-    beta_i = propList_considered{ii,4} / propList_considered{ii,3};
-    fprintf('%-22s %6.1f %6.1f %6.3f %10.2f %14.2f %12.1f\n', ...
-        propList_considered{ii,1}, ...
-        propList_considered{ii,3}, propList_considered{ii,4}, ...
-        beta_i, V_max_all(ii), T_surplus_hover_all(ii), t_lap_all(ii));
-end
+fprintf('--- 질량 수렴 루프 종료 ---\n');
+fprintf('최종 2안 기체 질량 : %.1f g  (1안 대비 %+.1f g)\n', ...
+    mass_Total_ff, mass_Total_ff - mass_Total);
 
-%% 최적 prop 선정 - 왕복 시간 최소화 (= 여유추력 최대 = 가속도 최대)
-valid_mask = V_max_all > 0 & ~isinf(t_lap_all) & ~isnan(t_lap_all);
-if ~any(valid_mask)
-    error('전진비행 가능한 prop 후보가 없습니다.');
-end
+%% 최종 prop/운용점 재계산 (수렴된 W_N 기준)
+W_N      = mass_Total_ff * 1e-3 * g_acc;
+beta_ff  = prop_ff{4} / prop_ff{3};
+D_ff     = prop_ff{3} * IN2M;
+n_lim_ff = prop_ff{6} / 60;
 
-t_lap_filtered = t_lap_all;
-t_lap_filtered(~valid_mask) = inf;
-[t_lap_best, idx_ff_best] = min(t_lap_filtered);
-
-V_max_best = V_max_all(idx_ff_best);
-prop_ff    = propList_considered(idx_ff_best, :);
-beta_ff    = prop_ff{4} / prop_ff{3};
-D_ff       = prop_ff{3} * IN2M;
-
-fprintf('\n[설계 2안] 선정 Prop: %s\n', prop_ff{1});
-fprintf('  직경 %.1fin / 피치 %.1fin / beta=%.3f\n', prop_ff{3}, prop_ff{4}, beta_ff);
-fprintf('  여유추력 T_surplus : %.2f N\n', T_surplus_hover_all(idx_ff_best));
-fprintf('  최대 전진속도     : %.2f m/s (%.1f km/h)\n', V_max_best, V_max_best*3.6);
-fprintf('  10회 왕복 추정    : %.1f 초  (L=%.1fm 기준)\n', t_lap_best, L_course);
-
-%% 전진비행 운용점 계산
-% V_ff: 최대속도의 95% 에서 운용점 설정 (안전 여유)
-V_ff       = V_max_best * 0.95;
-% n_lim_ff는 아래 운용점 계산 블록에서 선언
-
+% 최종 전진비행 운용점
 alpha_ff = 0.1;
 for iter = 1:30
     Sref     = Stop * sin(alpha_ff) + Sfront * cos(alpha_ff);
-    Df       = 0.5 * Cd_frame * rho * V_ff^2 * Sref;
-    alpha_ff = atan2(Df, W_N);
+    Df_ff    = 0.5 * Cd_frame * rho * V_ff^2 * Sref;
+    alpha_ff = atan2(Df_ff, W_N);
 end
 Sref_ff    = Stop * sin(alpha_ff) + Sfront * cos(alpha_ff);
 Df_ff      = 0.5 * Cd_frame * rho * V_ff^2 * Sref_ff;
 T_total_ff = sqrt(W_N^2 + Df_ff^2);
 T_one_ff   = T_total_ff / RotorNo;
 
-% n_req_ff를 n_lim을 초기값으로 반복 수렴
-% V_ff가 클 때 n_hover_hz 기반 Ja로 계산하면 J가 과도하게 커져
-% CT가 0 근방으로 떨어지고 n_req_ff가 발산하는 문제를 방지.
-n_lim_ff = propList_considered{idx_ff_best,6} / 60;  % RPM 한계 [Hz]
-n_req_ff  = n_lim_ff;   % 초기값: RPM 한계
-
+n_req_ff = n_lim_ff;
 for conv_iter = 1:30
-    Ja_ff_iter  = max(V_ff * sin(alpha_ff) / (n_req_ff * D_ff), 0);
-    J_ff_iter   = V_ff / (n_req_ff * D_ff);
-    CT0_ff      = max(CT_axial(beta_ff, Ja_ff_iter), 0);
+    Ja_ff_iter = max(V_ff * sin(alpha_ff) / (n_req_ff * D_ff), 0);
+    J_ff_iter  = V_ff / (n_req_ff * D_ff);
+    CT0_ff     = max(CT_axial(beta_ff, Ja_ff_iter), 0);
     try, etaT_ff = eta_T(alpha_ff, J_ff_iter, beta_ff); catch, etaT_ff = 1; end
     etaT_ff   = max(min(etaT_ff, 3), 0.1);
     CT_ff_val = CT0_ff * etaT_ff;
     if CT_ff_val <= 0, break; end
-
     n_new = sqrt(T_one_ff / (CT_ff_val * rho * D_ff^4));
     if abs(n_new - n_req_ff) / max(n_req_ff, 1e-6) < 1e-5, break; end
     n_req_ff = n_new;
 end
+n_req_ff  = min(n_req_ff, n_lim_ff);
+RPM_ff    = n_req_ff * 60;
 
-% RPM 한계 초과 시 클램프
-n_req_ff = min(n_req_ff, n_lim_ff);
-RPM_ff   = n_req_ff * 60;
-
-Ja_ff   = max(V_ff * sin(alpha_ff) / (n_req_ff * D_ff), 0);
-J_ff    = V_ff / (n_req_ff * D_ff);
-CP0_ff  = CP_axial(beta_ff, Ja_ff);
+Ja_ff    = max(V_ff * sin(alpha_ff) / (n_req_ff * D_ff), 0);
+J_ff     = V_ff / (n_req_ff * D_ff);
+CP0_ff   = CP_axial(beta_ff, Ja_ff);
 try, etaP_ff = eta_P(alpha_ff, J_ff, beta_ff); catch, etaP_ff = 1; end
 etaP_ff  = max(min(etaP_ff, 3), 0.1);
 P_one_ff = max(CP0_ff * etaP_ff * rho * n_req_ff^3 * D_ff^5, 0);
-
 Torque_ff = P_one_ff / (2*pi*max(n_req_ff, 1e-6));
 
+%% 결과 출력
+fprintf('\n======= 최종 선정 결과 =======\n');
+fprintf('[설계 2안] 선정 Prop: %s\n', prop_ff{1});
+fprintf('  직경 %.1fin / 피치 %.1fin / beta=%.3f\n', prop_ff{3}, prop_ff{4}, beta_ff);
+fprintf('  여유추력 T_surplus : %.2f N\n', T_surplus_hover_all(idx_ff_best));
+fprintf('  최대 전진속도     : %.2f m/s (%.1f km/h)\n', V_max_best, V_max_best*3.6);
+fprintf('  10회 왕복 추정    : %.1f 초  (L=%.1fm 기준)\n', t_lap_best, L_course);
+
 fprintf('\n[전진비행 운용점 (V=%.1f m/s, %.1f%%Vmax)]\n', V_ff, V_ff/V_max_best*100);
-fprintf('  기체 경사각 α : %.2f deg\n', rad2deg(alpha_ff));
-fprintf('  기체 항력 Df  : %.2f N\n', Df_ff);
-fprintf('  로터 1개 추력 : %.1f g  (%.3f N)\n', T_one_ff/g_acc*1000, T_one_ff);
-fprintf('  필요 RPM      : %.0f RPM\n', RPM_ff);
+fprintf('  기체 중량 W_N     : %.3f N  (mass_Total_ff = %.1f g)\n', W_N, mass_Total_ff);
+fprintf('  기체 경사각 α     : %.2f deg\n', rad2deg(alpha_ff));
+fprintf('  기체 항력 Df      : %.2f N\n', Df_ff);
+fprintf('  로터 1개 추력     : %.1f g  (%.3f N)\n', T_one_ff/g_acc*1000, T_one_ff);
+fprintf('  필요 RPM          : %.0f RPM\n', RPM_ff);
 fprintf('  로터 1개 소비전력 : %.1f W\n', P_one_ff);
 fprintf('  로터 1개 토크     : %.4f Nm\n', Torque_ff);
 
-%% 2안 모터 선정
-fprintf('\n[2안 모터 선정 중...]\n');
-
-% 호버 운용점 (main.m에서 계산됨)
-speedHover_ff  = operatingPoints{idx_ff_best,1}(1);
-torqueHover_ff = operatingPoints{idx_ff_best,1}(3) * SafetyFactor;
-
-% 전진비행 운용점 (위에서 계산)
-speedFF_rpm  = RPM_ff;
-torqueFF_nm  = Torque_ff * SafetyFactor;
-
-% 호버와 전진비행 중 더 높은 RPM/토크를 설계 상한으로 사용
-speedMax_design  = max(speedHover_ff, speedFF_rpm) * SafetyFactor;
-torqueMax_design = max(torqueHover_ff, torqueFF_nm);
-
-spec_mass_ff = mass_Motor_Est;
-
-fprintf('  전진비행 RPM    : %.0f RPM  (여유 포함 %.0f RPM)\n', RPM_ff, speedMax_design);
-fprintf('  전진비행 Torque : %.4f Nm  (여유 포함 %.4f Nm)\n', Torque_ff, torqueMax_design);
-fprintf('  호버 RPM        : %.0f RPM\n', speedHover_ff);
-fprintf('  kV 최소 요구값  : %.0f KV  (= speedMax/0.8/Vbatt)\n', ...
-    speedMax_design / (0.8 * BattCellNo * BattCellVoltage));
-fprintf('  모터 질량 상한  : %.0f g\n', spec_mass_ff);
-
-motorList_ff = load_motorList( ...
-    BattCellNo * BattCellVoltage, ...
-    speedMax_design, torqueMax_design, ...
-    speedHover_ff, torqueHover_ff, ...
-    spec_mass_ff);
-
-% 후보 없으면 질량 상한 단계적 완화
-if isempty(motorList_ff)
-    fprintf('  [질량 상한 완화 시도]\n');
-    for mass_relax = [150, 200, 999]
-        motorList_ff = load_motorList( ...
-            BattCellNo * BattCellVoltage, ...
-            speedMax_design, torqueMax_design, ...
-            speedHover_ff, torqueHover_ff, ...
-            mass_relax);
-        if ~isempty(motorList_ff)
-            fprintf('  → 질량 상한 %dg 으로 완화 후 후보 %d개 발견\n', ...
-                mass_relax, size(motorList_ff,1));
-            break;
-        end
-    end
-end
-
-if isempty(motorList_ff)
-    fprintf('[오류] 질량 상한 999g 까지 완화해도 조건 만족 모터 없음.\n');
-    fprintf('  kV 최소 요구값 %.0f KV 이상인 모터가 목록에 없거나\n', ...
-        speedMax_design / (0.8 * BattCellNo * BattCellVoltage));
-    fprintf('  배터리 전압(%dS=%.1fV)이 너무 낮을 수 있습니다.\n', ...
-        BattCellNo, BattCellNo*BattCellVoltage);
-    motorChosen_ff = {};
-    best_esc_ff    = {};
-else
-    % 전진비행 전력 최소 모터 선정
-    [~, idx_motor_ff] = min([motorList_ff{:,8}]);
-    motorChosen_ff = motorList_ff(idx_motor_ff,:);
-
+if ~isempty(motorChosen_ff)
     fprintf('\n[설계 2안] 선정 Motor: %s  (%d KV)\n', ...
         motorChosen_ff{2}, round(motorChosen_ff{5}/10)*10);
     fprintf('  허용전류 : %.0f A  /  질량 : %.0f g\n', ...
@@ -376,31 +492,17 @@ else
         motorChosen_ff{8}, motorChosen_ff{9});
     fprintf('  호버 소비전력     : %.0f W  /  효율 : %.1f %%\n', ...
         motorChosen_ff{11}, motorChosen_ff{12});
+end
 
-    %% 2안 ESC 선정
-    esc_List_ff    = load_escList();
-    req_current_ff = ceil(motorChosen_ff{7}) * 1.2;
+if ~isempty(best_esc_ff)
+    fprintf('\n[설계 2안] 선정 ESC: %s  (허용 %dA, %.1fg)\n', ...
+        best_esc_ff{2}, best_esc_ff{3}, best_esc_ff{4});
+end
 
-    best_esc_ff  = {};
-    min_mass_ff  = inf;
-    for i = 1:size(esc_List_ff,1)
-        if esc_List_ff{i,3} >= req_current_ff && esc_List_ff{i,4} < min_mass_ff
-            min_mass_ff = esc_List_ff{i,4};
-            best_esc_ff = esc_List_ff(i,:);
-        end
-    end
-
-    if isempty(best_esc_ff)
-        fprintf('[경고] ESC 리스트에 조건 만족하는 제품이 없습니다. (요구 %.1f A)\n', req_current_ff);
-    else
-        fprintf('\n[설계 2안] 선정 ESC: %s  (허용 %dA, %.1fg)\n', ...
-            best_esc_ff{2}, best_esc_ff{3}, best_esc_ff{4});
-    end
-
-    %% 2안 호버 시간 계산 (main.m Peukert 배터리 모델과 동일 로직)
-    % 잔류 변수 충돌 방지를 위해 명시적으로 초기화
+%% 2안 호버 시간 계산 (Peukert 배터리 모델, main.m과 동일 로직)
+if ~isempty(motorChosen_ff)
     clear voltage_hover_ff current_hover_ff capacity_hover_ff
-    timeStep_ff          = 1/3600;   % 1초 단위 [h] (main.m과 동일)
+    timeStep_ff          = 1/3600;
     BattCapacity_Ah_ff   = BattCapacity / 1000;
     voltage_hover_ff(1)  = BattCellNo * (BattCellVoltage + 0.5);
     current_hover_ff(1)  = motorChosen_ff{11} * RotorNo / voltage_hover_ff(1);
@@ -418,8 +520,8 @@ else
             - sum(current_hover_ff(2:end) * timeStep_ff);
         jj = jj + 1;
     end
-    time_hover_ff = (0:jj-1) * timeStep_ff;
-    hover_min_ff  = round(time_hover_ff(end) * 60);
+    time_hover_ff_arr = (0:jj-1) * timeStep_ff;
+    hover_min_ff      = round(time_hover_ff_arr(end) * 60);
 
     %% 설계 1안 vs 2안 비교 요약
     fprintf('\n\n========== 설계안 비교 요약 ==========\n');
@@ -438,13 +540,16 @@ else
     end
     fprintf('%-22s  %12.0f  %12.0f\n', 'Hover time (min)', ...
         round(time_hover(end)*60), hover_min_ff);
-    % 1안 최대속도: V_max_all에서 1안 프롭 인덱스로 직접 조회
+    % 1안 기체 질량 vs 2안 수렴 후 기체 질량
+    fprintf('%-22s  %12.0f  %12.0f\n', 'mass_Total (g)', ...
+        mass_Total, mass_Total_ff);
+    % 1안 최대속도 조회
     V_max_plan1 = V_max_all(temp_propChosen_pos);
     fprintf('%-22s  %12.1f  %12.1f\n', 'Max speed (m/s)', V_max_plan1, V_max_best);
     fprintf('%s\n', repmat('-', 1, 50));
 end
 
-%% 그래프: 전진속도 vs 여유추력 (1안 vs 2안 비교)
+%% 그래프: 전진속도 vs 여유추력 (1안 vs 2안)
 prop1_pos = temp_propChosen_pos;
 
 figure('Name', '[설계 2안] 전진비행 여유추력 곡선', 'Position', [100 100 900 550]);
@@ -461,8 +566,8 @@ for target_ii = unique([prop1_pos, idx_ff_best])
         V = V_scan(kk);
         alpha_k = 0.05;
         for iter = 1:15
-            Sref  = Stop * sin(alpha_k) + Sfront * cos(alpha_k);
-            Df_k  = 0.5 * Cd_frame * rho * V^2 * Sref;
+            Sref    = Stop * sin(alpha_k) + Sfront * cos(alpha_k);
+            Df_k    = 0.5 * Cd_frame * rho * V^2 * Sref;
             alpha_k = atan2(Df_k, W_N);
         end
         T_req_N = sqrt(W_N^2 + ...
@@ -478,6 +583,7 @@ for target_ii = unique([prop1_pos, idx_ff_best])
     end
 
     lbl = propList_considered{target_ii,1};
+    ls  = '-';
     if target_ii == prop1_pos,   lbl = ['1안: ' lbl]; ls = '--'; end
     if target_ii == idx_ff_best, lbl = ['2안: ' lbl]; ls = '-';  end
     plot(V_scan, T_surplus_plot, ls, 'LineWidth', 2, 'DisplayName', lbl);
@@ -486,9 +592,11 @@ end
 yline(0, 'k:', 'LineWidth', 1.5, 'DisplayName', '여유추력=0 (Vmax 한계)');
 xlabel('전진 속도 V [m/s]', 'FontSize', 12);
 ylabel('여유 추력 [g]', 'FontSize', 12);
-title('[설계 2안] 전진속도 vs 여유추력 (RPM 한계 기준)', 'FontSize', 13);
+title(sprintf('[설계 2안] 전진속도 vs 여유추력 (수렴 mass=%.0fg)', mass_Total_ff), 'FontSize', 13);
 legend('Location', 'southwest', 'FontSize', 10);
 grid on;
 xlim([0, max(V_scan)]);
 
 fprintf('\n[완료] forward_flight_analysis.m 실행 완료\n');
+fprintf('  → mass_Total_ff = %.1f g 가 workspace에 저장됨\n', mass_Total_ff);
+fprintf('  → ground_effect_analysis.m / arm_wake_analysis.m 에서 이 값을 사용하세요.\n');

@@ -603,9 +603,6 @@ fprintf('  → ground_effect_analysis.m / arm_wake_analysis.m 에서 이 값을 
 
 %% =========================================================================
 %% 그래프 2: 후보 프롭 전체 비교 산점도
-%%   aero_analysis의 비추력 산점도와 같은 방식으로,
-%%   기동성 지표(t_lap, V_max, T_surplus)를 축으로 삼아
-%%   2안 선정 프롭이 왜 1등인지 한눈에 보여줌.
 %% =========================================================================
 
 % --- 유효 후보만 추려서 라벨 준비 ---
@@ -674,12 +671,12 @@ yline(t_lap_best, '--', 'Color', clr_plan2, 'LineWidth', 1.2, ...
     'LabelHorizontalAlignment', 'left', 'FontSize', 9);
 
 xlabel('최대 전진속도 V_{max} [m/s]', 'FontSize', 12);
-ylabel('10회 왕복 추정 시간 t_{lap} [s]  (낮을수록 좋음)', 'FontSize', 12);
-title(sprintf('[설계 2안] 후보 프롭 기동성 비교 — t_{lap} vs V_{max}\n(mass = %.0f g, 수렴 후 기준)', ...
+ylabel('10회 왕복 추정 시간 t_{lap} [s] ', 'FontSize', 12);
+title(sprintf('[설계 2안] 후보 프롭 기동성 비교 — t_{lap} vs V_{max}', ...
     mass_Total_ff), 'FontSize', 12, 'FontWeight', 'normal');
 legend('Location', 'northeast', 'FontSize', 10);
 grid on; box off;
-set(gca, 'YDir', 'reverse');   % t_lap 낮을수록 위 (좋은 방향이 위)
+%set(gca, 'YDir', 'reverse');   % t_lap 낮을수록 위 (좋은 방향이 위)
 hold off;
 
 %% ---- Figure 3: T_surplus(호버 여유추력) vs t_lap 산점도 ----
@@ -725,7 +722,7 @@ yline(t_lap_best, '--', 'Color', clr_plan2, 'LineWidth', 1.2, ...
 
 xlabel('호버 여유추력 T_{surplus} [g]  (클수록 가속력 우수)', 'FontSize', 12);
 ylabel('10회 왕복 추정 시간 t_{lap} [s]  (낮을수록 좋음)', 'FontSize', 12);
-title(sprintf('[설계 2안] 후보 프롭 기동성 비교 — T_{surplus} vs t_{lap}\n(2안 선정: T_{surplus} 최대 → t_{lap} 최소)' ...
+title(sprintf('[설계 2안] 후보 프롭 기동성 비교 — T_{surplus} vs t_{lap}' ...
     ), 'FontSize', 12, 'FontWeight', 'normal');
 legend('Location', 'northeast', 'FontSize', 10);
 grid on; box off;

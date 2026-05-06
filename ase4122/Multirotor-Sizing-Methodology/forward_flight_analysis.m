@@ -485,7 +485,7 @@ fprintf('  로터 1개 토크     : %.4f Nm\n', Torque_ff);
 
 if ~isempty(motorChosen_ff)
     fprintf('\n[설계 2안] 선정 Motor: %s  (%d KV)\n', ...
-        motorChosen_ff{2}, round(motorChosen_ff{5}/10)*10);
+        motorChosen_ff{2}, motorChosen_ff{5});
     fprintf('  허용전류 : %.0f A  /  질량 : %.0f g\n', ...
         motorChosen_ff{3}, motorChosen_ff{4});
     fprintf('  전진비행 소비전력 : %.0f W  /  효율 : %.1f %%\n', ...
@@ -532,7 +532,7 @@ if ~isempty(motorChosen_ff)
     fprintf('%-22s  %12.1f  %12.1f\n', 'Prop pitch (in)', propSpecification{3}, prop_ff{4});
     fprintf('%-22s  %12s  %12s\n', 'Motor', motorChosen{2}, motorChosen_ff{2});
     fprintf('%-22s  %12d  %12d\n', 'Motor kV', ...
-        round(motorChosen{5}/10)*10, round(motorChosen_ff{5}/10)*10);
+        motorChosen{5}, motorChosen_ff{5});
     fprintf('%-22s  %12.0f  %12.0f\n', 'Hover P/rotor (W)', ...
         motorChosen{11}, motorChosen_ff{11});
     if ~isempty(best_esc) && ~isempty(best_esc_ff)

@@ -16,13 +16,13 @@ end
 
 figure;
 subplot(2,1,1);
-plot(Isp, m_prop);
+plot(Isp, m_prop, LineStyle, "o-");
 xlabel('Isp');
 ylabel('m_{prop}');
 grid('on');
 
 subplot(2,1,2);
-plot(Isp, m_wet);
+plot(Isp, m_wet, LineStyle, "o-");
 xlabel('Isp');
 ylabel('m_{wet}');
 grid('on');

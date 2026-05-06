@@ -19,10 +19,9 @@
 %   3단계: Planar — L/R spacing별 추력 여유 비교
 %   4단계: Non-Planar — l/d spacing별 추력 여유 비교
 %
-% [분기]
-%   prop_ff 변수 존재 → 2안(전진비행 최적 프롭)
-%   없음              → 1안(호버 최적 프롭)
-%   mass_Total_ff 존재 → 수렴 후 2안 질량 우선 사용
+% [선정된 설계값]
+%   Planar   : L/R = 3.0  (고정)
+%   Non-Planar: l/d = 1.4, tilt = 30°  (고정)
 %% ========================================================================
 
 %% ── 실행 순서 확인 ───────────────────────────────────────────────────────
@@ -73,16 +72,16 @@ fprintf('------------------------------\n\n');
 fprintf('=== 1단계: 렘니스케이트(역물방울) 단면 치수 ===\n');
 
 %── arm_wake_analysis 결과 수신
-h_mm           = bestPracticalCandidate.ArmThickness_mm;   % 유동 방향 투영 높이 [mm]
+w_mm           = bestPracticalCandidate.ArmThickness_mm;   % 유동 방향 투영 높이 [mm]
 arm_thrustloss = bestPracticalCandidate.ThrustLoss_pct;    % 추력 손실 [%]
 
 %── 렘니스케이트 치수
 tw           = 1.0;              % 벽 두께 [mm]
 rho_carbon   = 1.55e-3;          % 카본 밀도 [g/mm³]
 
-a_outer      = h_mm / sqrt(2);   % 외곽 a
+a_outer      = w_mm;   % 외곽 a
 a_inner      = a_outer - tw;     % 내부 a (벽 두께 반영)
-w_mm         = a_outer;          % 최대 폭 (= a_outer)
+h_mm         = a_outer*sqrt(2);          % 최대 폭 (= a_outer)
 
 A_outer      = a_outer^2;        % 외곽 루프 단면적 [mm²]
 A_inner      = a_inner^2;        % 내부 루프 단면적 [mm²]
@@ -163,14 +162,11 @@ for i = 1:length(spacings_p)
         lr_labels{i}, total_aum_p(i), thrust_gen_p(i), thrust_req_p(i), margin_p(i), ok);
 end
 
-valid_mask_p = margin_p > 0;
-if any(valid_mask_p)
-    [best_margin_p, best_i_p] = max(margin_p .* valid_mask_p);
-    fprintf('\n★ 권장 spacing: %s  (여유 추력 +%.0f gf, 총 AUM %.0f g)\n', ...
-        lr_labels{best_i_p}, best_margin_p, total_aum_p(best_i_p));
-else
-    fprintf('\n[경고] 모든 Planar spacing에서 필요 추력 미달. 프롭 크기 또는 TWR 재검토 필요.\n');
-end
+% 선정된 spacing: L/R = 3.0 (고정)
+best_i_p     = find(spacings_p == 3.0);
+best_margin_p = margin_p(best_i_p);
+fprintf('\n 선정 spacing: %s  (여유 추력 %+.0f gf, 총 AUM %.0f g)\n', ...
+    lr_labels{best_i_p}, best_margin_p, total_aum_p(best_i_p));
 fprintf('\n');
 
 %── Planar 그래프
@@ -242,14 +238,11 @@ for i = 1:length(ld_sp)
         ld_lbl{i}, total_aum_n(i), thrust_gen_n(i), thrust_req_n(i), margin_n(i), ok);
 end
 
-valid_mask_n = margin_n > 0;
-if any(valid_mask_n)
-    [best_margin_n, best_i_n] = max(margin_n .* valid_mask_n);
-    fprintf('\n★ 권장 l/d: %s  (여유 추력 +%.0f gf, 총 AUM %.0f g)\n', ...
-        ld_lbl{best_i_n}, best_margin_n, total_aum_n(best_i_n));
-else
-    fprintf('\n[경고] 모든 Non-Planar spacing에서 필요 추력 미달. 프롭 크기 또는 TWR 재검토 필요.\n');
-end
+% 선정된 spacing: l/d = 1.4 (고정), tilt = 30°
+best_i_n     = find(ld_sp == 1.4);
+best_margin_n = margin_n(best_i_n);
+fprintf('\n 선정 l/d: %s  (여유 추력 %+.0f gf, 총 AUM %.0f g)\n', ...
+    ld_lbl{best_i_n}, best_margin_n, total_aum_n(best_i_n));
 
 %── Non-Planar 그래프
 figure('Color','white','Position',[100,100,1100,520]);
@@ -352,13 +345,4 @@ fprintf('질량 출처   : %s\n', mass_src);
 fprintf('암 단면     : 렘니스케이트  h=%.2fmm, w=%.2fmm, tw=%.0fmm\n', h_mm, w_mm, tw);
 fprintf('단위 암무게 : %.4f g/mm\n', weight_per_mm);
 fprintf('추력 손실   : %.3f %%\n', arm_thrustloss);
-fprintf('------------------------------\n');
-if exist('best_i_p','var')
-    fprintf('[Planar]     권장 %s  →  최종 AUM %7.1f g  (여유 +%.0f gf)\n', ...
-        lr_labels{best_i_p}, final_aum_p, best_margin_p);
-end
-if exist('best_i_n','var')
-    fprintf('[Non-Planar] 권장 %s  →  최종 AUM %7.1f g  (여유 +%.0f gf)\n', ...
-        ld_lbl{best_i_n}, final_aum_n, best_margin_n);
-end
 fprintf('==============================\n');

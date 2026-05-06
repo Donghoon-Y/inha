@@ -16,13 +16,19 @@ end
 
 figure;
 subplot(2,1,1);
-plot(Isp, m_prop, LineStyle, "o-");
-xlabel('Isp');
-ylabel('m_{prop}');
+hold on;
+plot(Isp, m_prop);
+scatter(Isp, m_prop, DisplayName ='m_prop data')
+xlabel('Isp[s]');
+ylabel('m_{prop}[kg]');
 grid('on');
+hold off;
 
 subplot(2,1,2);
-plot(Isp, m_wet, LineStyle, "o-");
-xlabel('Isp');
-ylabel('m_{wet}');
+hold on;
+plot(Isp, m_wet);
+scatter(Isp, m_wet, DisplayName ='m_wet data')
+xlabel('Isp[s]');
+ylabel('m_{wet}[kg]');
 grid('on');
+hold off;

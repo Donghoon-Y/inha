@@ -32,3 +32,6 @@ xlabel('Isp[s]');
 ylabel('m_{wet}[kg]');
 grid('on');
 hold off;
+
+disp(m_prop);
+disp(m_wet);

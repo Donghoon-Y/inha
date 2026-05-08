@@ -295,15 +295,15 @@ bestPracticalCandidate (arm_wake_analysis 출력 — 암 단면 치수)
 선정 프롭 반경 (1안: propSpecification / 2안: prop_ff 자동 전환)
 기체 총 질량 (1안: mass_Total / 2안: mass_Total_ff 자동 전환)
     ↓
-① 렘니스케이트(역물방울) 단면 치수 계산
+렘니스케이트(역물방울) 단면 치수 계산
    US11305881 특허 단면: (y²+x²)² = 2a²(y²-x²) 상단 루프
    a_outer = h/√2,  단면적 A = a²,  단위 길이당 무게 계산
     ↓
-② L/R spacing별 암 길이 산출
+L/R spacing별 암 길이 산출
    S500 기준 암 길이(250mm)에서 출발
    arm_length = spacing × d_prop × 25.4 / √2
     ↓
-③ Planar — L/R spacing별 추력 여유 비교
+Planar — L/R spacing별 추력 여유 비교
    RPM 구간별 추력 증가율 적용
    렘니스케이트 단면 기반 암 추가 질량 반영
    → 추력 여유 기준 최적 spacing 선정 (L/R = 3.0)
@@ -369,7 +369,7 @@ AcceptedTypes     = {'MR' 'E-3' 'E-4'};  % 허용 프롭 시리즈
 
 BattCellNo        = 4;           % 배터리 셀 수 (S)
 BattCellVoltage   = 3.7;         % 셀 공칭 전압 [V]
-BattCapacity      = 5200;        % 배터리 용량 [mAh]
+BattCapacity      = 5000;        % 배터리 용량 [mAh]
 BattPeukertConstant = 1.3;       % Peukert 상수 (LiPo 기준)
 
 %% 질량 파라미터 [g]
@@ -380,7 +380,7 @@ mass_FC_CurrentSensor = 15;      % 전류 센서
 mass_Receiver         = 2;       % 수신기
 mass_optical          = 1.5;     % 광류 센서
 mass_Payload          = 500;     % 탑재물
-mass_Battery          = 473;     % Lumenier 5200mAh 4S 35C
+mass_Battery          = 500;     % 4S 5000mAh (학과 지급)
 ```
 
 ---
@@ -437,7 +437,7 @@ mass_Battery          = 473;     % Lumenier 5200mAh 4S 35C
 | 정면 투영면적 `Sfront` | 0.021 m² |
 | 항력계수 `Cd_frame` | 1.0 (일반 쿼드콥터 오픈 프레임 기준) |
 | 허용 프롭 시리즈 | MR / E-3 / E-4, 최대 14 inch |
-| 탑재 배터리 | Lumenier 5200mAh 4S 35C (473 g) |
+| 탑재 배터리 | 4S 5000mAh (500 g, 학과 지급) |
 | 암 재질 (기준) | 렘니스케이트(역물방울) 단면 카본 파이프 |
 
 ---

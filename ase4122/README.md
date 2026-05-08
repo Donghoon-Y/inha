@@ -295,15 +295,15 @@ bestPracticalCandidate (arm_wake_analysis 출력 — 암 단면 치수)
 선정 프롭 반경 (1안: propSpecification / 2안: prop_ff 자동 전환)
 기체 총 질량 (1안: mass_Total / 2안: mass_Total_ff 자동 전환)
     ↓
-렘니스케이트(역물방울) 단면 치수 계산
+① 렘니스케이트(역물방울) 단면 치수 계산
    US11305881 특허 단면: (y²+x²)² = 2a²(y²-x²) 상단 루프
    a_outer = h/√2,  단면적 A = a²,  단위 길이당 무게 계산
     ↓
-L/R spacing별 암 길이 산출
+② L/R spacing별 암 길이 산출
    S500 기준 암 길이(250mm)에서 출발
    arm_length = spacing × d_prop × 25.4 / √2
     ↓
-Planar — L/R spacing별 추력 여유 비교
+③ Planar — L/R spacing별 추력 여유 비교
    RPM 구간별 추력 증가율 적용
    렘니스케이트 단면 기반 암 추가 질량 반영
    → 추력 여유 기준 최적 spacing 선정 (L/R = 3.0)

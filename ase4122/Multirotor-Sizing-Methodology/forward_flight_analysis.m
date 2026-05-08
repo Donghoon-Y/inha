@@ -3,17 +3,13 @@
 %
 % 실행 순서:
 %   main.m 실행 후 이 파일 실행
-%   이후: ground_effect_analysis.m → arm_wake_analysis.m
+%   이후:   arm_wake_analysis.m  → plnar_analysis  → ground_effect_analysis
 %
 % 목적:
 %   main.m의 호버 후보 prop(propList_considered) 중에서
 %   전진비행 최대속도를 최대화하는 prop / motor / ESC 를 선정합니다.
 %
-% [수정] 질량 수렴 루프 추가:
-%   2안에서 선정된 motor/ESC/prop 무게가 1안과 다를 수 있으므로
-%   mass_Total_ff 를 반복 갱신하여 W_N(기체 중량)을 수렴시킴.
-%   수렴 완료 후 downstream 해석(ground_effect, arm_wake)을 위해
-%   mass_Total_ff 를 workspace 에 저장함.
+%
 %
 % 적용 이론 - Pollet et al., ICAS 2020:
 %   1. 전진비행 힘 평형 (Eq. 3a/3b)

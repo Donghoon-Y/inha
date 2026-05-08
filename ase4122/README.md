@@ -1,369 +1,204 @@
 # Multirotor Sizing Methodology
 
 멀티로터 드론의 **프로펠러 · 모터 · ESC · 배터리**를 자동으로 선정하고,  
-체공시간 · 전진비행 성능 · 암 형상 · 지면효과 · 암 후류 간섭까지 통합 분석하는 MATLAB 설계 도구입니다.
+공력 해석 · 암 후류 간섭 · 최적 암 길이 설계 · 지면효과까지 통합 분석하는 MATLAB 설계 도구입니다.
 
 Biczyski et al. (2020) *"Multirotor Sizing Methodology with Flight Time Estimation"* 의 방법론을 기반으로 하며,  
-전진비행 해석(Pollet et al., ICAS 2021), 지면효과, 암 형상 공력 해석, 렘니스케이트(역물방울) 단면 기반 암 설계 모듈이 추가되었습니다.
+전진비행 해석(Pollet et al., ICAS 2021), Leng et al. 비축 입사각 모델, 렘니스케이트(역물방울) 단면 기반 암 설계 모듈이 추가되었습니다.
 
 ---
 
-## 설계 방향
+## 임무별 설계 방향
 
-두 가지 설계안을 병렬로 도출합니다.
+세 가지 미션 목표를 기반으로 설계 방향을 도출합니다.
+
+| 미션 | 목표 | 설계 전략 |
+|------|------|-----------|
+| **Heavy Lift** | 탑재중량 증가에 따른 충분한 총 추력 및 여유 추력 확보 | 허용 Disk Loading 범위 내 최적 고추력 모터/프로펠러 선정 |
+| **Endurance** | 동일 전력 대비 추력 극대화로 장시간 체공 실현 | 모터-프로펠러 조합 비추력(g/W)을 주요 지표로 소모 전력 최소화 |
+| **Maneuverability** | 급격한 가속·감속 및 자세 제어를 위한 고응답성 확보 | 최대 추력 외 모터 응답성, 프로펠러 관성, 추중비 종합 고려 |
+
+로터 수 Trade-off 분석(비행 안정성 vs 경량화)을 통해 **4개 로터 기반 쿼드콥터**를 기초 형상으로 선정하였습니다.
+
+### 설계 1안 vs 2안
 
 | 구분 | 목표 | 최적화 기준 |
 |------|------|-------------|
 | **설계 1안 (Endurance)** | 체공시간 최대화 | 호버링 비추력 (g/W) 최대 |
 | **설계 2안 (Maneuverability)** | 왕복비행 시간 최소화 | 여유추력(T_surplus) 최대 → 가속도 최대 |
 
-> **두 안 모두** 동일한 후보 프롭 풀(`propList_considered`)에서 출발합니다.  
-> 1안은 호버 효율, 2안은 전진비행 여유추력을 기준으로 각자 최적 prop / motor / ESC를 독립 선정합니다.
+두 안 모두 동일한 후보 프롭 풀(`propList_considered`)에서 출발하며, 각자 독립적으로 최적 prop / motor / ESC를 선정합니다.
 
 ---
 
-## 전체 실행 흐름
+## 데이터베이스 구성
 
-### 설계 1안 (Endurance — 체공시간 최적화)
+설계 코드는 세 가지 DB를 참조합니다.
 
-```
-main.m
-  │  호버 최적 prop / motor / ESC 선정
-  │  mass_Total (실측 부품 기반 기체 질량) 확정
-  │
-  ├─► aero_analysis.m
-  │     Disk Loading · Figure of Merit · 비추력 곡선
-  │     (1안 프롭 기준, 후보 전체 비교 포함)
-  │
-  ├─► ground_effect_analysis.m
-  │     멀티로터 지면효과 모델 (로터 간 간섭 + fountain effect)
-  │     랜딩기어 높이 설계 기준 도출
-  │
-  ├─► arm_wake_analysis.m
-  │     암 형상/두께별 후류 공력 손실 계산
-  │     허용 손실률 이내 최적 암 후보(bestPracticalCandidate) 도출
-  │
-  └─► planar_analysis.m
-        [Planar]   L/R spacing별 발생 추력 vs 필요 추력 비교
-        [Non-Planar] l/d spacing · tilt 30°별 추력 여유 비교
-        렘니스케이트 단면 기반 암 무게 반영
-        → 암 길이·형상 설계 기준 도출
-```
+### APC 프로펠러 DB (`APC_Prop/`)
 
-### 설계 2안 (Maneuverability — 기동성 최적화)
+| 파일 | 내용 |
+|------|------|
+| `WEBLIST.xlsx` | APC 프롭 전체 목록 (기종명, 파일명). 6행부터 데이터 |
+| `PROP-DATA-FILE_202602.xlsx` | 직경·피치·무게 데이터 (2026년 2월 기준). `PRODUCT LIST` 시트 사용 |
+| `PER2_STATIC-2.DAT` | 전 기종 정적(V=0) 성능 통합 데이터 (~300종). 추력(LBF)·전력(HP)·토크(IN-LBF) → 코드 내에서 g·W·Nm 변환 수행 |
+| `PERFILES2/` | 기종별 개별 동적 성능 파일 (~300개). 전진비행 advance ratio J 기반 CT/CP 수록 |
+| `PER2_RPMRANGE.DAT` | 기종별 데이터 수록 RPM 하한/상한 |
 
-```
-main.m
-  │  (1안과 동일 실행, 호버 후보 프롭 풀 생성)
-  │
-  └─► forward_flight_analysis.m
-        ┌─ 질량 수렴 루프 (최대 10회, 허용 오차 1g) ─────────────────┐
-        │  W_N = mass_Total_ff 기반 전진비행 힘 평형                  │
-        │  CT/CP 비축 입사각 보정 (Leng et al.)                       │
-        │  왕복 시간 기준 최적 prop 선정                              │
-        │  2안 motor / ESC 선정                                       │
-        │  mass_Total_ff = mass_Total                                  │
-        │                  + Δmotor × RotorNo                         │
-        │                  + ΔESC   × RotorNo                         │
-        │                  + Δprop  × RotorNo   → 재수렴              │
-        └──────────────────────────────────────────────────────────────┘
-        mass_Total_ff 확정 → workspace 저장
-        2안 호버 시간 계산 (Peukert 배터리 모델)
-        1안 vs 2안 비교 출력 + 여유추력 곡선 / 기동성 산점도 그래프
-              │
-              ├─► ground_effect_analysis.m
-              │     (prop_ff · mass_Total_ff 기준으로 자동 전환)
-              │
-              ├─► arm_wake_analysis.m
-              │     (prop_ff · motorChosen_ff 기준으로 자동 전환)
-              │
-              └─► planar_analysis.m
-                    (prop_ff · mass_Total_ff 기준으로 자동 전환)
-                    Planar + Non-Planar 통합 분석
-```
-
-> **질량 수렴 루프**: 2안에서 선정된 motor/ESC/prop의 무게가 1안과 다를 경우  
-> `mass_Total_ff`를 반복 갱신하여 전진비행 힘 평형과 부품 선정을 수렴시킵니다.  
-> 수렴 후 `mass_Total_ff`가 workspace에 저장되고, 이후 모든 downstream 파일이 이 값을 참조합니다.
-
----
-
-## downstream 자동 분기 동작
-
-`ground_effect_analysis.m`, `arm_wake_analysis.m`, `planar_analysis.m`은  
-workspace에 `prop_ff` / `mass_Total_ff`가 존재하는지 자동으로 감지하여  
-설계안별 입력값을 전환합니다.
-
-| 실행 순서 | `prop_ff` | `mass_Total_ff` | 사용 기준 |
-|-----------|:---------:|:---------------:|-----------|
-| `main` → downstream | 없음 | 없음 | `propSpecification` · `mass_Total` (1안) |
-| `main` → `forward_flight` → downstream | 있음 | 있음 | `prop_ff` · `mass_Total_ff` (2안 수렴값) |
-| `forward_flight` 실패 → downstream | 있음 | 없음 | `mass_Total` 폴백 + 경고 출력 |
-
-> `planar_analysis.m`은 추가로 `arm_wake_analysis.m`의 출력인 `bestPracticalCandidate`를  
-> 필수 입력으로 요구합니다. 반드시 `arm_wake_analysis.m` 이후에 실행하세요.
-
----
-
-## 파일 구조
-
-```
-.
-├── main.m                        # 설계 1안: 호버 최적 prop / motor / ESC / 배터리
-├── forward_flight_analysis.m     # 설계 2안: 전진비행 기동성 최적화 + 질량 수렴 루프
-├── aero_analysis.m               # 공력 해석 — Disk Loading, Figure of Merit (1안 기준)
-├── ground_effect_analysis.m      # 지면효과 해석 — 랜딩기어 높이 설계
-├── arm_wake_analysis.m           # 암 후류 공력 손실 해석 — 최적 암 후보 도출
-├── planar_analysis.m             # 암 길이/형상 통합 해석 (Planar + Non-Planar)
-│                                 #   ※ 구 inverted_teardrop_mass.m 내용 통합됨
-│
-├── src/
-│   ├── load_propList.m           # APC 프롭 목록 로딩 (WEBLIST.xlsx + PROP-DATA-FILE)
-│   ├── load_propPerf.m           # APC 정적 성능 데이터 파싱 (PER2_STATIC-2.DAT)
-│   ├── load_motorList.m          # 모터 필터링 · 하드/소프트 조건 적용 · 점수 정렬
-│   ├── load_escList.m            # ESC 목록 로딩 (ESC_data.xlsx)
-│   ├── compare_hoverTime.m       # 설계안 간 체공시간 비교
-│   └── validate_propPerf.m       # 프롭 성능 데이터 유효성 검증
-│
-├── plot/
-│   ├── plot_propPerf.m           # 프롭 성능 곡선 + 배터리 시뮬레이션 그래프
-│   ├── plot_motorPerf.m          # 모터 성능 그래프
-│   └── addaxis*.m                # 다중 Y축 플롯 유틸리티 (외부 라이브러리)
-│
-├── APC_Prop/
-│   ├── PER2_STATIC-2.DAT         # APC 전 기종 정적 성능 통합 데이터 (~300종)
-│   ├── WEBLIST.xlsx              # APC 프롭 전체 목록
-│   ├── PROP-DATA-FILE_202602.xlsx # APC 치수/무게 데이터 (2026년 2월 기준)
-│   ├── PROP-DATA-EXPERIMENTAL.xlsx # 실험 측정 데이터
-│   └── PERFILES2/                # 기종별 개별 동적 성능 .dat 파일 (~300개)
-│
-├── motor_list/
-│   └── Motor_list.xlsx           # 모터 DB (이름, kV, Rm, I_max, 질량, I0)
-│
-└── ESC_list/
-    └── ESC_data.xlsx             # ESC DB (이름, 정격전류, 질량)
-```
-
----
-
-## APC 데이터 구조
-
-### PER2_STATIC-2.DAT — 정적 성능 통합 파일
-
-`load_propPerf.m`이 읽는 핵심 데이터 파일입니다.  
-전 기종의 정적(V=0) 성능이 하나의 파일에 순차적으로 수록되어 있습니다.
+`PER2_STATIC-2.DAT` 구조:
 
 ```
 ====== APC Propeller Static Thrust VS. RPM Predictions =======
 
-                   105x45.dat                     ← 기종 구분자 (파일명 기반 검색)
+               105x45.dat                     ← 기종 구분자
 
     RPM       THRUST      POWER      TORQUE        Cp        Ct
                (LBF)       (HP)     (IN-LBF)
 
    1000         0.03        0.00       0.02       0.03      0.08
-   2000         0.13        0.00       0.08       0.03      0.08
    ...
                                                            ← 빈 줄 = 다음 기종 시작
-                   105x6.dat
-   ...
 ```
 
-- 단위: 추력 LBF, 전력 HP, 토크 IN-LBF → 코드 내에서 g·W·Nm으로 변환
-- `load_propPerf.m`은 기종명으로 파일을 선형 탐색한 뒤 빈 줄까지 읽어 행렬로 반환
+### 모터 DB (`motor_list/Motor_list.xlsx`)
 
-### PERFILES2/ — 기종별 동적 성능 파일 (~300개)
+**80% 쓰로틀 조건에서 기체 총 중량 4kg 이상을 들 수 있는 모터**를 사전 필터링한 리스트 (총 52종)입니다.  
+모터명, kV, 권선 저항(Rm), 최대 전류(I_max), 질량, 무부하 전류(I0) 포함.
 
-전진비행 성능(advance ratio J 기반)이 RPM별로 수록된 개별 파일입니다.  
-`forward_flight_analysis.m`의 CT/CP 회귀 모델 검증에 참조됩니다.
+### ESC DB (`ESC_list/ESC_data.xlsx`)
 
-```
-10x4.5MR   (10x45MR.dat)                 ← 기종명 및 파일명
-
-====== PERFORMANCE DATA (versus advance ratio and MPH) ======
-
-PROP RPM = 2000
-
-   V       J        Pe       Ct       Cp      PWR    Torque   Thrust
- (mph)  (Adv Ratio)                           (Hp)  (In-Lbf)  (Lbf)
-   0.0    0.00    0.0000   0.1102   0.0428   0.003    0.087    0.140
-   0.5    0.02    0.0621   0.1086   0.0432   0.003    0.088    0.138
-   ...
-                                             ← RPM 블록 반복 (2000, 3000, ...)
-PROP RPM = 3000
-   ...
-```
-
-### WEBLIST.xlsx — 프롭 목록
-
-`load_propList.m`이 읽는 인덱스 파일입니다.
-
-| 열 | 내용 |
-|----|------|
-| A | 기종명 (예: `10x4.5MR`) |
-| B | 파일명 (예: `PER3_10x45MR.dat`) |
-
-5행까지 헤더이며 6행부터 데이터입니다.
-
-### PROP-DATA-FILE_202602.xlsx — 치수/무게 데이터
-
-`PRODUCT LIST` 시트에서 직경·피치·무게를 읽습니다.
-
-| 열 | 내용 |
-|----|------|
-| A (1열) | 제품명 (예: `10x4.5MR`) |
-| G (7열) | 피치 [inch] |
-| H (8열) | 직경 [inch] |
-| P (16열) | 무게 [g] |
-
-> 이전 버전(P열 = 16열)에서 열 인덱스가 명시적으로 확정되었습니다.
-
-### PER2_RPMRANGE.DAT — RPM 범위
-
-각 기종의 데이터 수록 RPM 하한/상한을 기록합니다.  
-`load_propPerf.m`에서 RPM 한계(`speedLimit_rpm`) 추출에 사용됩니다.
-
-```
-105x45          1000    23000
-105x6           1000    19000
-10x45MR         2000    23000
-...
-```
-
-### PER2_TITLEDAT.DAT — 파일명-기종명 매핑
-
-```
-파일명 (32자)              기종명 (20자)
-PER3_105x45.dat            10.5x4.5
-PER3_10x45MR.dat           10x4.5MR
-...
-```
+ESC명, 정격전류, 질량 포함.
 
 ---
 
-## 주요 파라미터 설정 (`main.m`)
+## 전체 코드 파이프라인
 
-```matlab
-RotorNo           = 4;           % 로터 수
-OptimisationGoal  = 'hover';     % 'hover' | 'max' | 'utilisation'
-ThrustWeightRatio = 2;           % 추력-중량비 (2=최소, 3=수송, 5+=곡예)
-PropDiameter_Min  = 0;           % 프롭 직경 하한 [inch]  ※ 변경: 9→0 (전체 허용)
-PropDiameter_Max  = 14;          % 프롭 직경 상한 [inch]  ※ 변경: 12→14
-SafetyFactor      = 1.1;         % 안전 계수
-AcceptedTypes     = {'MR' 'E-3' 'E-4'};  % 허용 프롭 시리즈  ※ 변경: 'E' 제거, 'E-4' 추가
-
-BattCellNo        = 4;           % 배터리 셀 수 (S)
-BattCellVoltage   = 3.7;         % 셀 공칭 전압 [V]
-BattCapacity      = 5200;        % 배터리 용량 [mAh]  ※ 변경: 5000→5200
-BattPeukertConstant    = 1.3;    % Peukert 상수 (LiPo 기준)
-BattVoltageSagConstant = 0.5/0.8*BattCellNo;  % 전압 강하 상수
-
-%% 질량 파라미터 [g]
-mass_Frame            = 222.5;   % 프레임 질량  ※ 변경: 405→222.5
-mass_FC               = 34.6;    % 비행 컨트롤러  ※ 신규 항목
-mass_FC_GPS           = 7;       % GPS 모듈      ※ 신규 항목
-mass_FC_CurrentSensor = 15;      % 전류 센서     ※ 신규 항목
-mass_Receiver         = 2;       % 수신기
-mass_optical          = 1.5;     % 광류 센서     ※ 신규 항목
-mass_Other_Est        = 20;      % 케이블·스트랩 등 기타
-
-mass_Motor_Est    = 93;          % 모터 질량 추정값 [g]
-mass_ESC_Est      = 6.6;         % ESC 질량 추정값 [g]
-mass_Propeller_Est = 18;         % 프롭 질량 추정값 [g]
-
-mass_Payload      = 500;         % 페이로드 [g]
-mass_Battery      = 473;         % Lumenier 5200mAh 4S 35C [g]  ※ 신규 항목
+```
+├ main.m                    : 설계 1안 — Endurance 중점 추진 시스템 선정
+├ forward_flight_analysis.m : 설계 2안 — Maneuverability 중점 추진 시스템 선정
+├ aero_analysis.m           : 공력 해석 (Disk Loading, Figure of Merit, 비추력)
+├ arm_wake_analysis.m       : arm 형상·두께·배치 조건에 따른 추력 손실률 분석
+├ planar_analysis.m         : 선정된 프롭·모터 기준 최적 arm 길이 설계
+├ ground_effect_analysis.m  : 지면효과 분석 및 최적 랜딩기어 높이 설계
+│
+├ src/
+│  ├ load_propList.m        : APC 프롭 직경·피치·질량·RPM 제한값 DB 구성
+│  ├ load_propPerf.m        : PER2_STATIC-2.DAT에서 RPM·추력·토크·출력 추출
+│  ├ load_motorList.m       : 요구 RPM·토크·전류·질량 조건 기반 모터 필터링 및 점수 정렬
+│  └ load_escList.m         : 요구 전류 조건을 만족하는 ESC 선정
 ```
 
-> `mass_Motor_Est`는 모터 필터링의 초기 질량 상한으로만 사용됩니다.  
-> 실제 선정 후 `mass_Total`(1안) / `mass_Total_ff`(2안 수렴값)로 갱신됩니다.
+### 실행 순서
 
-**주요 파라미터 변경 요약**
+**설계 1안 (Endurance)**
 
-| 파라미터 | 이전 값 | 현재 값 | 변경 이유 |
-|----------|---------|---------|-----------|
-| `PropDiameter_Min` | 9 inch | 0 inch | 직경 하한 제한 제거 (전 범위 탐색) |
-| `PropDiameter_Max` | 12 inch | 14 inch | 더 큰 프롭 후보 포함 |
-| `AcceptedTypes` | `{'MR','E','E-3'}` | `{'MR','E-3','E-4'}` | E 시리즈 제거, 4블레이드(E-4) 추가 |
-| `BattCapacity` | 5000 mAh | 5200 mAh | 실제 탑재 배터리 사양 반영 |
-| `mass_Frame` | 405 g | 222.5 g | 실측 프레임 무게 반영 |
-| `mass_Battery` | (없음) | 473 g | 배터리 실측 무게 추가 |
-| 질량 항목 | 4개 | 9개 | FC/GPS/전류센서/광류센서 등 세분화 |
+```
+main → aero_analysis → arm_wake_analysis → planar_analysis → ground_effect_analysis
+```
+
+**설계 2안 (Maneuverability)**
+
+```
+main → forward_flight_analysis → arm_wake_analysis → planar_analysis → ground_effect_analysis
+```
+
+`aero_analysis.m`은 설계 1안 전용입니다. 설계 2안은 전진비행 성능 기반으로 프롭을 선정하므로 호버 공력 해석 단계를 수행하지 않습니다.
+
+`arm_wake_analysis` → `planar_analysis` → `ground_effect_analysis` 순서는 반드시 지켜야 합니다.  
+각 파일은 이전 단계의 workspace 변수(`bestPracticalCandidate`, `best_arm_len_p`)를 필수 입력으로 사용합니다.
+
+`arm_wake_analysis.m`, `planar_analysis.m`, `ground_effect_analysis.m`은  
+workspace에 `prop_ff` / `mass_Total_ff`가 존재하는지 자동으로 감지하여 설계안별 입력값을 전환합니다.
+
+| 실행 순서 | `prop_ff` 존재 | 사용 기준 |
+|-----------|:--------------:|-----------|
+| `main` → downstream | 없음 | `propSpecification` · `mass_Total` (1안) |
+| `main` → `forward_flight` → downstream | 있음 | `prop_ff` · `mass_Total_ff` (2안 수렴값) |
 
 ---
 
-## 설계 1안 흐름 (`main.m`)
+## 설계 1안: Endurance 추진 시스템 선정 (`main.m`)
+
+S500 프레임을 기초 형상으로, 호버링 비추력을 기준으로 최적 prop / motor / ESC / 배터리를 선정합니다.
 
 ```
-사용자 파라미터 입력
+① 총 질량 추정 (mass_Total_Est)
+   frame + FC/GPS/센서류 + motor_Est×N + ESC_Est×N + prop_Est×N + batt + payload
     ↓
-① 프롭 후보 필터링
-   직경 범위 + 허용 타입 조건 → propList_considered
+② 후보 프롭 로드 (load_propList)
+   직경·피치·질량·RPM 제한값 필터링 (AcceptedTypes, PropDiameter_Min/Max)
     ↓
-② APC 정적 성능 데이터 로딩
-   PER2_STATIC-2.DAT + PERFILES2/ → RPM vs Thrust / Power / Torque / Ct / Cp
+③ 성능 데이터 파싱 (load_propPerf)
+   PER2_STATIC-2.DAT → RPM별 추력·토크·출력 행렬
     ↓
-③ 운용점 계산 (보간)
-   호버 운용점 / WOT 운용점 / RPM 한계 운용점 → operatingPoints
+④ 운용점 계산 (operatingPoints)
+   hover / WOT / RPM limit 기준 3개 운용점 도출
     ↓
-④ 최적 프롭 선정
-   APC 실측 파워(col2) 기준 비추력(g/W) 최대화 → propSpecification
-   ※ 이전: (ω×Torque + APC파워)/2 평균 → 현재: APC 실측 파워 단일 기준
+⑤ 프롭 선정 — APC 실측 파워(col2) 기반 비추력 최대
+   → propSpecification (1안 선정 프롭)
     ↓
-⑤ 모터 선정 (load_motorList)
-   전압·토크·전류 조건 + 호버 소비전력 최소화 → motorChosen
+⑥ 모터 선정 (load_motorList)
+   하드 탈락: disc<0 / I_req>I_max / kV_margin<0.7
+   소프트 페널티: 질량 초과 / kV_margin 0.7~1.0
+   → motorChosen
     ↓
-⑥ ESC 선정 (전류 여유 20%)
+⑦ ESC 선정 (load_escList) — 요구 전류 × 1.2 여유 기준
    → best_esc
     ↓
-⑦ 배터리 시뮬레이션 (Peukert 방정식)
-   호버 / WOT 비행시간 추정 → time_hover, time_max
+⑧ 실측 질량 확정 (mass_Total)
+   frame + FC/GPS/센서류 + 선정 motor×N + 선정 ESC×N + 선정 prop×N + batt + payload
     ↓
-⑧ 실측 질량 확정
-   mass_Total = frame + FC/GPS/센서류 + motor×N + ESC×N + prop×N + batt + payload + misc
-    ↓
+⑨ 체공시간 계산 (Peukert 배터리 모델)
 결과 출력 + 그래프
 ```
 
+**최종 선정 결과 (설계 1안)**
+
+| 항목 | 결과 |
+|------|------|
+| 프로펠러 | APC 12x5.5MR |
+| 모터 | KDE3510 475kV |
+| ESC | KISS ESC 3-6S 32A |
+
 ---
 
-## 설계 2안 흐름 (`forward_flight_analysis.m`)
+## 설계 2안: Maneuverability 추진 시스템 선정 (`forward_flight_analysis.m`)
 
-설계 1안의 호버 후보 프롭(`propList_considered`)을 그대로 계승하여 전진비행 성능을 평가합니다.
+설계 1안의 호버 후보 프롭(`propList_considered`)을 그대로 계승하여 전진비행 성능을 평가합니다.  
+선정된 motor/ESC/prop 무게 변화를 반영하는 **질량 수렴 루프**를 포함합니다.
+
+적용 이론: Pollet et al. (ICAS 2021) 힘 평형 모델 + Leng et al. 비축 입사각 CT/CP 보정
 
 ```
 설계 1안 호버 후보 프롭 (propList_considered)
     ↓
-┌── 질량 수렴 루프 (max 10회, 허용 오차 1g) ──────────────────────────┐
-│                                                                      │
-│  W_N = mass_Total_ff × g  (매 iter 갱신)                            │
-│      ↓                                                               │
-│  ① 전진비행 힘 평형 (Pollet Eq. 3, 수치 반복)                       │
-│     기체 경사각 α 수렴 계산                                          │
-│      ↓                                                               │
-│  ② CT / CP 전진비행 보정 (Pollet Eq. 8-9)                           │
-│     Leng et al. 비축 입사각 모델 적용                               │
-│      ↓                                                               │
-│  ③ 기동성 점수 계산 (왕복 시간 추정)                                │
-│     T_surplus → a_max → t_lap (삼각형 속도 프로파일)               │
-│      ↓                                                               │
-│  ④ 최적 prop 선정                                                    │
-│     10회 왕복 시간 최소화 (= 여유추력 최대화)                       │
-│      ↓                                                               │
-│  ⑤ 모터 선정 (load_motorList)                                        │
-│     호버 + 전진비행 운용점 중 더 혹독한 조건 기준                   │
-│     전진비행 소비전력 최소화                                         │
-│      ↓                                                               │
-│  ⑥ ESC 선정 (전류 여유 20%)                                          │
-│      ↓                                                               │
-│  ⑦ 질량 갱신                                                         │
-│     mass_Total_ff = mass_Total                                       │
-│                   + (motor_ff - motor_1안) × N                      │
-│                   + (ESC_ff  - ESC_1안)   × N                       │
-│                   + (prop_ff - prop_1안)  × N                       │
-│      ↓                                                               │
-│  |Δmass| < 1g → 수렴 종료                                           │
-└──────────────────────────────────────────────────────────────────────┘
+┌── 질량 수렴 루프 (max 10회, 허용 오차 1g) ─────────────────────────────┐
+│                                                                         │
+│  ① 전진비행 힘 평형 (Pollet Eq. 3, 수치 반복)                          │
+│     W_N = mass_Total_ff × g 기반 기체 경사각 α 수렴 계산               │
+│      ↓                                                                  │
+│  ② CT / CP 전진비행 보정 (Pollet Eq. 8-9)                              │
+│     Leng et al. 비축 입사각 모델 적용                                  │
+│     C_{T,P}(α, J) = η_{T,P}(α) · C_{T,P}^{axial}(β, J_{axial})        │
+│      ↓                                                                  │
+│  ③ 기동성 지표 계산 — 10회 왕복 시간 추정                              │
+│     T_surplus → a_max → t_lap (삼각형 속도 프로파일, L=2m)            │
+│      ↓                                                                  │
+│  ④ 최적 prop 선정 — 왕복 시간 최소화 (= 여유추력 최대화)               │
+│      ↓                                                                  │
+│  ⑤ 모터 선정 (load_motorList)                                           │
+│     호버 + 전진비행 운용점 중 더 혹독한 조건 기준                      │
+│      ↓                                                                  │
+│  ⑥ ESC 선정 — 전류 여유 20%                                             │
+│      ↓                                                                  │
+│  ⑦ 질량 갱신                                                            │
+│     mass_Total_ff = mass_Total                                          │
+│                   + (motor_ff - motor_1안) × N                         │
+│                   + (ESC_ff  - ESC_1안)   × N                          │
+│                   + (prop_ff - prop_1안)  × N                          │
+│      ↓                                                                  │
+│  |Δmass| < 1g → 수렴 종료                                              │
+└─────────────────────────────────────────────────────────────────────────┘
     ↓
 mass_Total_ff 확정 → workspace 저장
 2안 호버 시간 계산 (Peukert 배터리 모델)
@@ -374,27 +209,35 @@ mass_Total_ff 확정 → workspace 저장
 그래프 3: T_surplus vs t_lap 산점도 (여유추력 vs 왕복시간 상관관계)
 ```
 
-### 왕복 시간 추정 수식
+**기동성 지표 수식**
 
-$$T_{surplus} = N_{rotors} \cdot T_{max} - W$$
+$$T_{total} = \sqrt{W^2 + D_f^2}, \quad D_f = \frac{1}{2}C_d \rho V^2 S_{ref}$$
 
-$$a_{max} = \frac{\sqrt{T_{total}^2 - W^2}}{m}$$
+$$a_{max} = \frac{\sqrt{T_{max}^2 - W^2}}{m}, \quad t_{lap} = 20 \times 2\sqrt{\frac{L}{a_{max}}} \quad (L=2\,\text{m},\ \text{왕복 10회})$$
 
-$$t_{lap} = 20 \times 2\sqrt{\frac{L}{a_{max}}} \quad (L = 2\,\text{m},\ 10\text{회 왕복})$$
+**최종 선정 결과 (설계 2안)**
 
-> 항력 및 제어 지연을 무시한 이상적 조건의 하한 추정값입니다. 프롭 간 상대적 성능 비교에 활용합니다.
+| 항목 | 결과 |
+|------|------|
+| 프로펠러 | APC 11x7E-3 |
+| 모터 | MN3110 700kV |
+| ESC | KISS ESC 3-6S 32A |
+| Hover Time | 18 min |
+| t_lap (10회) | 5.3s |
+
+1안 대비 호버 시간 3분 감소, 왕복시간 30% 감소, 최대속도 53% 향상
 
 ---
 
 ## 공력 해석 (`aero_analysis.m`)
 
-항상 **1안(호버 최적 프롭)** 기준으로 수행합니다.
+항상 **1안(호버 최적 프롭)** 기준으로, 후보 프롭 전체의 공력 성능을 비교·시각화합니다.
 
 ```
 후보 프롭 전체 (propList_considered)
     ↓
 ① Disk Loading 계산
-   DL = T / A  [Pa]  (A = π·(D/2)²)
+   DL = T / A  [g/cm²]  (A = π·(D/2)²)
     ↓
 ② Figure of Merit 계산
    FM = (T^1.5 / sqrt(2ρA)) / P_mech
@@ -402,177 +245,208 @@ $$t_{lap} = 20 \times 2\sqrt{\frac{L}{a_{max}}} \quad (L = 2\,\text{m},\ 10\text
 ③ 비추력 vs RPM 곡선
    선정 프롭 강조 + 후보 전체 비교
     ↓
-그래프 출력 (DL·FM·비추력 산점도 + 성능 곡선)
+그래프 1: DL vs FM 산점도 + 비추력 등고선
+그래프 2: 호버링 비추력 막대그래프 (통과 프롭 내림차순)
 ```
-
-> 지면효과 분석은 이 파일에서 수행하지 않습니다.  
-> 멀티로터 전용 모델(로터 간 간섭 + fountain effect)은 `ground_effect_analysis.m`에서 수행합니다.
 
 ---
 
-## 지면효과 해석 (`ground_effect_analysis.m`)
+## Arm 형상에 따른 추력 손실 분석 (`arm_wake_analysis.m`)
+
+선정된 프롭 기준으로 암 형상·두께·배치별 후류 공력 손실을 계산합니다.  
+허용 손실률(3%) 이내 최적 암 후보(`bestPracticalCandidate`)를 도출하며, 이 값은 이후 `planar_analysis.m`의 필수 입력으로 사용됩니다.
 
 ```
 선정 프롭 (1안: propSpecification / 2안: prop_ff 자동 전환)
     ↓
-① 유도속도 계산
-   v_i = sqrt(T / (2·ρ·A))
-    ↓
-② 멀티로터 지면효과 모델 (computeQuadGroundEffect 로컬 함수)
-   단일 로터 Cheeseman-Bennett + 인접/대각 로터 간섭 + fountain effect
-    ↓
-③ 고도별 추력 증가율 곡선
-    ↓
-④ 랜딩기어 높이 설계 기준
-   지면효과 임계 고도 (1D, 1.5D, 2D 기준) 도출
-    ↓
-그래프 출력
-```
-
----
-
-## 암 후류 공력 손실 해석 (`arm_wake_analysis.m`)
-
-```
-선정 프롭 (1안 / 2안 자동 전환)
-    ↓
-① 후류 속도 계산
+① 후류 속도 계산 (Actuator disk theory)
+   v_i    = sqrt(T / (2·ρ·A))
    v_wake = k · v_i  (k: 암 위치에 따른 계수)
     ↓
-② 암 형상별 항력 계산
+② 암 형상별 항력 및 추력 손실률 계산
    D_arm = 0.5·ρ·v_wake²·Cd·A_proj
    형상: circular(Cd=1.10) / square(1.80) / elliptic(0.50) / streamlined(0.15)
     ↓
-③ 추가 소비전력 계산
-   ΔP = D_arm · v_wake
-    ↓
-④ 허용 손실률(3%) 이내 최적 암 후보 도출
-   → bestPracticalCandidate (암 형상·두께·위치 포함)
-   ※ planar_analysis.m의 필수 입력값으로 사용됨
+③ 허용 손실률(3%) 이내 최대 두께 도출
+   → bestPracticalCandidate (암 형상·두께·손실률 포함)
     ↓
 그래프 출력 (손실률 vs 암 두께/형상)
 ```
 
+**결과 요약 (설계 2안 기준)**
+
+| 형상 | 최대 두께 [mm] | 후류 속도 [m/s] | 항력 [N] | 손실률 [%] |
+|------|:--------------:|:---------------:|:--------:|:----------:|
+| Circular | 30 | 27.94 | 1.638 | 2.98 |
+| Square | 18 | 27.94 | 1.608 | 2.93 |
+| Elliptic | 40 | 27.94 | 0.990 | 1.81 |
+| Streamlined | 40 | 27.94 | 0.296 | 0.54 |
+
 ---
 
-## 암 길이 및 형상 해석 (`planar_analysis.m`)
+## 최적 Arm 길이 설계 (`planar_analysis.m`)
 
-구 `planar_analysis.m`과 `inverted_teardrop_mass.m`이 **하나의 파일로 통합**되었습니다.
+`arm_wake_analysis.m`의 `bestPracticalCandidate`를 입력으로 받아,  
+**선정된 프롭과 모터에 최적화된 암 길이를 설계**합니다.  
+초기 기준인 S500 프레임(암 길이 250mm)에서 출발하여, 렘니스케이트(역물방울) 단면 기반 암 질량과 추력 여유를 함께 고려한 최적 spacing을 도출합니다.
 
 ```
-arm_wake_analysis의 bestPracticalCandidate (암 단면 치수)
-선정 프롭 반경 d  (1안: propSpecification / 2안: prop_ff 자동 전환)
-기체 질량 base_aum (1안: mass_Total / 2안: mass_Total_ff 자동 전환)
+bestPracticalCandidate (arm_wake_analysis 출력 — 암 단면 치수)
+선정 프롭 반경 (1안: propSpecification / 2안: prop_ff 자동 전환)
+기체 총 질량 (1안: mass_Total / 2안: mass_Total_ff 자동 전환)
     ↓
 [1단계] 렘니스케이트(역물방울) 단면 치수 계산
-   US11305881 특허 단면: (y²+x²)² = 2a²(y²−x²) 상단 루프
-   a_outer = h/√2,  w = a_outer,  단면적 A = a²
+   US11305881 특허 단면: (y²+x²)² = 2a²(y²-x²) 상단 루프
+   a_outer = h/√2,  단면적 A = a²,  단위 길이당 무게 계산
     ↓
-[2단계] 암 길이 계산
-   L/R spacing = 3.0 기준 (논문 최적값)
-   arm_length = (D/2 · √2) / (L/R)
+[2단계] 암 길이 계산 — L/R spacing 기준
+   S500 기준 암 길이(250mm)에서 출발하여 spacing별 암 길이 산출
+   arm_length = spacing × d_prop × 25.4 / √2
     ↓
 [3단계] Planar — L/R spacing별 추력 여유 비교
    논문 Figure 4 RPM별 추력 증가율 적용
-   렘니스케이트 단면 기반 암 단위 무게 반영
+   렘니스케이트 단면 기반 암 추가 질량 반영
+   → 추력 여유 최대 spacing 선정 (L/R = 3.0)
     ↓
 [4단계] Non-Planar — l/d spacing별 추력 여유 비교
-   tilt = 30° 고정
-   선정 l/d = 1.4 기준 최종 암 무게 도출
+   tilt = 30° 고정, l/d = 1.4 기준 최종 암 무게 도출
     ↓
-최적 spacing 및 암 길이 도출
+최적 암 길이 및 질량 확정 → best_arm_len_p workspace 저장
 그래프 출력
 ```
 
----
+**최종 결과 요약**
 
-## 모터 선정 정책 (`load_motorList.m`)
-
-| 조건 | 처리 | 근거 |
-|------|------|------|
-| 판별식 `disc < 0` | **하드 탈락** | 물리적으로 해 없음 (전압 부족) |
-| `I_req > I_max` | **하드 탈락** | 모터 정격 초과, 손상 위험 |
-| `kV_margin < 0.7` | **하드 탈락** | 풀스로틀에서도 필요 RPM 70% 미달 |
-| `mass > spec_mass` | **소프트 페널티** | 설계 추정값 초과, 조립 시 변동 가능 |
-| `kV_margin 0.7~1.0` | **소프트 페널티** | 작동 가능하나 RPM 마진 부족 |
-
-결과는 호버 소비전력 기반 점수 오름차순으로 정렬되어 반환됩니다.  
-ESC 선정 기준 전류 여유는 main.m과 forward_flight_analysis.m 모두 **20% (×1.2)** 로 통일되어 있습니다.
+| 설계 구분 | 설계 1안 | 설계 2안 |
+|-----------|:--------:|:--------:|
+| 최적 L/R | 3.0 | 3.0 |
+| 최적 암 길이 [mm] | 323 | 296 |
+| 암 질량 증가분 [g] | +35.4 | +22.2 |
+| 최종 기체 질량 [g] | 1906.4 | 1893.2 |
 
 ---
 
-## 프롭 선정 기준 변경 (`main.m`)
+## 지면효과 분석 (`ground_effect_analysis.m`)
 
-이전 버전에서 프롭의 비추력 선정 기준은 두 가지 파워 측정값(ω×Torque 역산값, APC 실측값)의 평균을 사용했습니다.  
-현재 버전에서는 **APC 실측 파워(col2) 단일 기준**으로 통일하였습니다.
+멀티로터 전용 지면효과 모델(로터 간 간섭 + fountain effect)을 적용하여 최적 랜딩기어 높이를 산출합니다.  
+`planar_analysis.m` 실행 후 `best_arm_len_p`가 workspace에 존재하면, S500 기본값(0.25m) 대신 **설계된 암 길이 기반 기하값**을 사용하여 보다 정확한 지면효과 해석을 수행합니다.
 
-| 항목 | 이전 | 현재 |
-|------|------|------|
-| 프롭 선정 파워 기준 | `(col1 + col2) / 2` | `col2` (APC 실측 파워) |
-| 이유 | col1(토크 역산)과 col2(실측)는 서로 다른 측정 경로 → 평균은 물리적으로 모호 | |
-| `methodError` | 미사용 | 두 경로 차이 모니터링 참고용으로만 유지 |
+```
+선정 프롭 + 설계된 암 길이 (planar_analysis 결과 자동 반영)
+    ↓
+① 유도속도 계산
+   v_i = sqrt(T / (2·ρ·A))
+    ↓
+② 멀티로터 지면효과 모델 (computeQuadGroundEffect)
+   단일 로터 Cheeseman-Bennett
+   + 인접/대각 로터 간섭 + fountain effect
+    ↓
+③ 고도별 추력 증가율 곡선
+    ↓
+④ 랜딩기어 높이 설계 기준 도출
+   fGE 기울기 기준(gradient_stop)으로 실용 상한 고도 결정
+    ↓
+그래프 출력
+```
 
-> `aero_analysis.m` 및 `arm_wake_analysis.m`도 모두 APC 실측 파워를 사용하므로  
-> 파일 간 비추력 수치 일관성이 확보됩니다.
+**최종 선정 결과**
+
+| 항목 | 1안 결과 | 2안 결과 |
+|------|:--------:|:--------:|
+| 프로펠러 | APC 12x5.5MR | APC 11x7E-3 |
+| Gradient Stop | 1.107 | 1.103 |
+| 판정 기준 | Upper-Limit Crossing | Upper-Limit Crossing |
+
+---
+
+## 주요 파라미터 설정 (`main.m`)
+
+```matlab
+RotorNo           = 4;           % 로터 수
+OptimisationGoal  = 'hover';     % 'hover' | 'max' | 'utilisation'
+ThrustWeightRatio = 2;           % 추력-중량비 (2=최소, 3=수송, 5+=곡예)
+PropDiameter_Min  = 0;           % 프롭 직경 하한 [inch]
+PropDiameter_Max  = 14;          % 프롭 직경 상한 [inch]
+SafetyFactor      = 1.1;         % 안전 계수
+AcceptedTypes     = {'MR' 'E-3' 'E-4'};  % 허용 프롭 시리즈
+
+BattCellNo        = 4;           % 배터리 셀 수 (S)
+BattCellVoltage   = 3.7;         % 셀 공칭 전압 [V]
+BattCapacity      = 5200;        % 배터리 용량 [mAh]
+BattPeukertConstant = 1.3;       % Peukert 상수 (LiPo 기준)
+
+%% 질량 파라미터 [g]
+mass_Frame            = 222.5;   % S500 프레임 질량 (실측값)
+mass_FC               = 34.6;    % 비행 컨트롤러
+mass_FC_GPS           = 7;       % GPS 모듈
+mass_FC_CurrentSensor = 15;      % 전류 센서
+mass_Receiver         = 2;       % 수신기
+mass_optical          = 1.5;     % 광류 센서
+mass_Payload          = 500;     % 탑재물
+mass_Battery          = 473;     % Lumenier 5200mAh 4S 35C
+```
 
 ---
 
 ## 주요 Workspace 변수
 
-### main.m 출력
+### main.m 출력 (설계 1안)
 
 | 변수 | 설명 |
 |------|------|
 | `propList_considered` | 호버 후보 프롭 전체 (`consideredNo × 6` cell) |
-| `operatingPoints` | 후보 프롭별 [hover/WOT/limit] 운용점 |
-| `temp_propChosen_pos` | 1안 선정 프롭 인덱스 |
 | `propSpecification` | 1안 선정 프롭 사양 `{name, diam_in, pitch_in}` |
-| `selectionCriterion` | 선정 점수 행렬 (inf = 탈락) |
-| `specThrust_criterion` | 비추력 기준 점수 벡터 |
 | `motorChosen` | 1안 선정 모터 (`1×12` cell) |
 | `best_esc` | 1안 선정 ESC |
 | `mass_Total` | 1안 실측 기체 질량 [g] |
-| `mass_Total_Est` | 추정값 기반 질량 [g] (프롭 선정 기준, 재계산 없음) |
 | `time_hover` | 1안 호버 비행시간 벡터 [h] |
 
-### forward_flight_analysis.m 출력 (2안)
+### forward_flight_analysis.m 출력 (설계 2안)
 
 | 변수 | 설명 |
 |------|------|
 | `prop_ff` | 2안 선정 프롭 (`1×6` cell) |
-| `idx_ff_best` | 2안 선정 프롭 인덱스 (`propList_considered` 기준) |
 | `V_max_best` | 최대 전진속도 [m/s] |
-| `V_ff` | 운용 전진속도 (0.95 × V_max_best) [m/s] |
 | `motorChosen_ff` | 2안 선정 모터 (`1×12` cell) |
 | `best_esc_ff` | 2안 선정 ESC |
-| `mass_Total_ff` | **2안 수렴 후 최종 기체 질량 [g]** ← downstream 전체 참조 |
+| `mass_Total_ff` | 2안 수렴 후 최종 기체 질량 [g] ← downstream 전체 참조 |
 
 ### arm_wake_analysis.m 출력
 
 | 변수 | 설명 |
 |------|------|
-| `bestPracticalCandidate` | 허용 손실률(3%) 이내 최적 암 후보 (형상·두께·위치 포함) |
+| `bestPracticalCandidate` | 허용 손실률(3%) 이내 최적 암 후보 (형상·두께·손실률 포함) |
 
-> `planar_analysis.m`은 `bestPracticalCandidate`를 필수 입력으로 사용합니다.
+### planar_analysis.m 출력
+
+| 변수 | 설명 |
+|------|------|
+| `best_arm_len_p` | Planar 기준 최적 암 길이 [mm] ← ground_effect_analysis 자동 참조 |
+| `best_arm_len_n` | Non-Planar 기준 최적 암 길이 [mm] |
 
 ---
 
-## 적용 프레임
+## 적용 프레임 (S500)
+
+초기 해석은 S500 프레임 기준 파라미터에서 출발합니다.  
+암 길이는 `planar_analysis.m`에서 선정된 프롭과 모터에 맞춰 최적값으로 재설계되며,  
+`ground_effect_analysis.m`은 해당 설계 결과를 자동으로 반영하여 지면효과 해석을 수행합니다.
 
 | 항목 | 값 |
 |------|----|
 | 휠베이스 | 500 mm |
 | 프레임 질량 | 222.5 g (실측값) |
+| 초기 암 길이 기준 | 250 mm (S500 기본값) |
 | 상면 투영면적 `Stop` | 0.059 m² |
 | 정면 투영면적 `Sfront` | 0.021 m² |
 | 항력계수 `Cd_frame` | 1.0 (일반 쿼드콥터 오픈 프레임 기준) |
-| 권장 프롭 | MR / E-3 / E-4 시리즈, 최대 14 inch |
+| 허용 프롭 시리즈 | MR / E-3 / E-4, 최대 14 inch |
 | 탑재 배터리 | Lumenier 5200mAh 4S 35C (473 g) |
 | 암 재질 (기준) | 렘니스케이트(역물방울) 단면 카본 파이프 |
 
 ---
 
-## 참고 문헌
+## 참고문헌
 
 - Biczyski et al. (2020). *Multirotor Sizing Methodology with Flight Time Estimation.* Journal of Advanced Transportation.
 - Pollet et al. (2021). *Design Optimization of Multirotor Drones in Forward Flight.* ICAS 2021.

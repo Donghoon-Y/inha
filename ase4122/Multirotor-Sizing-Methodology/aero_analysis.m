@@ -8,13 +8,10 @@
 %      실행 후 해당 프롭 인덱스(idx_ff_best)로 직접 조회할 것.
 %
 % ── 분석 항목 ──────────────────────────────────────────────────────────────
-%   [1순위] Disk Loading & Figure of Merit
+%   Disk Loading & Figure of Merit
 %           → 프롭 후보 전체의 DL·FM·비추력 비교 및 선정 근거 시각화
 %
-%   ※ [지면효과 & 랜딩기어 높이]는 ground_effect_analysis.m에서 수행.
-%      Cheeseman-Bennett 단일 로터 모델보다 로터 간 간섭·fountain effect를
-%      포함한 멀티로터 전용 모델(computeQuadGroundEffect)을 사용하므로
-%      이 파일에서 중복 구현하지 않음.
+%  
 %
 % ── 참조하는 Workspace 변수 (main.m 출력) ──────────────────────────────────
 %   필수:
@@ -56,7 +53,7 @@ fprintf('  ※ 항상 1안(호버 최적 프롭, index=%d) 기준\n', temp_propC
 fprintf('  ※ 지면효과 분석은 ground_effect_analysis.m 에서 수행\n\n');
 
 %% =========================================================================
-% [1순위] Disk Loading & Figure of Merit
+% Disk Loading & Figure of Merit
 % =========================================================================
 fprintf('======= Disk Loading & Figure of Merit =======\n');
 

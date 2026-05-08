@@ -4,20 +4,16 @@
 % 실행 순서:
 %
 %   [호버 최적 프롭 기준 지면효과 분석]
-%       main
-%       ground_effect_analysis
+%       main  → aero_analysis → arm_wake_analysis  →planar_analysis → ground_effect_analysis
 %
 %   [전진비행 최적 프롭 기준 지면효과 분석]
-%       main
-%       forward_flight_analysis
-%       ground_effect_analysis
+%       main  → forward_flight_analysis → arm_wake_analysis  →planar_analysis → ground_effect_analysis
 %
 % 목적:
 %   main.m 또는 forward_flight_analysis.m 실행 후 workspace에 남아있는
-%   최적 프롭 정보를 사용하여 S500 기준 지면효과와 랜딩기어 높이를 분석한다.
+%   최적 프롭 정보와 공력해석을 통해 정해진 arm 길이 기준 지면효과와 랜딩기어 높이를 분석한다.
 %
-% 필요 함수:
-%       computeQuadGroundEffect.m
+% 
 % =========================================================================
 
 %% -------------------------------------------------------------------------
@@ -80,25 +76,7 @@ gradient_stop_threshold = 0.9;   % [1/m], 약 0.009 fGE 변화 / 1 cm
 min_stop_height_m       = 0.1;  % [m], 너무 낮은 높이에서 조기 stop 방지
 
 %% -------------------------------------------------------------------------
-% [S500 기하 파라미터]
-% -------------------------------------------------------------------------
-% ArmLength_m:
-%   기체 중심에서 모터 축까지의 거리.
-%
-% X-quad 기준:
-%   d_m = 인접 로터 축 사이 거리
-%   b_m = 대각 로터 축 사이 거리
-%
-% 기본값은 S500 기준 ArmLength = 0.25 m이다.
-% 단, planar_analysis.m 실행 후 best_arm_len_p가 workspace에 존재하면
-% 해당 암길이를 우선 사용하여 d_m, b_m을 다시 계산한다.
-%
-% 실행 예:
-%   main
-%   planar_analysis
-%   ground_effect_analysis
-%
-% 위 순서로 실행하면 planar_analysis.m에서 산출된 best_arm_len_p를 사용한다.
+
 
 if exist('best_arm_len_p','var') && ~isempty(best_arm_len_p) && ~isnan(best_arm_len_p)
     % planar_analysis.m의 best_arm_len_p는 mm 단위로 계산된다.

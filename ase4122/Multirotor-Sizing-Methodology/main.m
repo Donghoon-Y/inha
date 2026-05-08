@@ -78,7 +78,7 @@ AcceptedTypes     = {'MR' 'E-3' 'E-4'}; % 허용 프롭 시리즈
 
 BattCellNo             = 4;    % 배터리 셀 수 [S]
 BattCellVoltage        = 3.7;  % 셀 공칭 전압 [V]
-BattCapacity           = 5200; % 배터리 용량 [mAh]
+BattCapacity           = 5000; % 배터리 용량 [mAh]
 BattPeukertConstant    = 1.3;  % Peukert 상수 (LiPo 기준)
 BattVoltageSagConstant = 0.5/0.8*BattCellNo; % 전압 강하 상수 (80% DoD 기준 셀당 0.5V)
 BattHourRating         = 1;    % 배터리 기준 방전 시간 [h]
@@ -102,7 +102,7 @@ mass_Propeller_Est = 18;
 % 탑재물 및 배터리
 % mass_Payload = 977;
 mass_Payload = 500;
-mass_Battery = 473;  % Lumenier 5200mAh 4S 35C
+mass_Battery = 500;  
 
 %% ── 총 무게 추정 (프롭·모터 선정 전 추정치) ───────────────────────────
 % 이 값으로 thrustHover_Est를 계산하여 프롭/모터 선정 전 과정에 사용.

@@ -295,21 +295,18 @@ bestPracticalCandidate (arm_wake_analysis 출력 — 암 단면 치수)
 선정 프롭 반경 (1안: propSpecification / 2안: prop_ff 자동 전환)
 기체 총 질량 (1안: mass_Total / 2안: mass_Total_ff 자동 전환)
     ↓
-[1단계] 렘니스케이트(역물방울) 단면 치수 계산
+렘니스케이트(역물방울) 단면 치수 계산
    US11305881 특허 단면: (y²+x²)² = 2a²(y²-x²) 상단 루프
    a_outer = h/√2,  단면적 A = a²,  단위 길이당 무게 계산
     ↓
-[2단계] 암 길이 계산 — L/R spacing 기준
-   S500 기준 암 길이(250mm)에서 출발하여 spacing별 암 길이 산출
+L/R spacing별 암 길이 산출
+   S500 기준 암 길이(250mm)에서 출발
    arm_length = spacing × d_prop × 25.4 / √2
     ↓
-[3단계] Planar — L/R spacing별 추력 여유 비교
-   논문 Figure 4 RPM별 추력 증가율 적용
+Planar — L/R spacing별 추력 여유 비교
+   RPM 구간별 추력 증가율 적용
    렘니스케이트 단면 기반 암 추가 질량 반영
-   → 추력 여유 최대 spacing 선정 (L/R = 3.0)
-    ↓
-[4단계] Non-Planar — l/d spacing별 추력 여유 비교
-   tilt = 30° 고정, l/d = 1.4 기준 최종 암 무게 도출
+   → 추력 여유 기준 최적 spacing 선정 (L/R = 3.0)
     ↓
 최적 암 길이 및 질량 확정 → best_arm_len_p workspace 저장
 그래프 출력
@@ -422,7 +419,6 @@ mass_Battery          = 473;     % Lumenier 5200mAh 4S 35C
 | 변수 | 설명 |
 |------|------|
 | `best_arm_len_p` | Planar 기준 최적 암 길이 [mm] ← ground_effect_analysis 자동 참조 |
-| `best_arm_len_n` | Non-Planar 기준 최적 암 길이 [mm] |
 
 ---
 

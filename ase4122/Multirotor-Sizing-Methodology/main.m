@@ -85,7 +85,7 @@ BattHourRating         = 1;    % 배터리 기준 방전 시간 [h]
 
 %% ── Mass data [g] ────────────────────────────────────────────────────────
 % 고정 구조물
-mass_Frame            = 222.5;
+mass_Frame            = 454; % 랜딩기어 포함
 mass_FC               = 34.6;
 mass_FC_GPS           = 7;
 mass_FC_CurrentSensor = 15;

@@ -47,7 +47,7 @@ g_acc = 9.80665;   % 중력가속도 [m/s^2]
 IN2M  = 0.0254;    % inch -> m
 
 %% 설계 파라미터
-targetLossPct        = 3.0;        % 허용 추력 손실률 [%]
+targetLossPct        = 1.0;        % 허용 추력 손실률 [%]
 armThickness_mm_list = 5:1:40;     % arm 두께 후보 [mm]
 yOverR_list          = 0:0.05:0.20;% arm 중심선 offset (y/R=0: 로터 중심 통과)
 zOverR_list          = 0.05:0.05:1.00; % arm 수직 위치 (z/R=0.05: 디스크 바로 아래)

@@ -48,12 +48,12 @@ IN2M  = 0.0254;    % inch -> m
 
 %% 설계 파라미터
 targetLossPct        = 1.0;        % 허용 추력 손실률 [%]
-armThickness_mm_list = 5:1:40;     % arm 두께 후보 [mm]
+armThickness_mm_list = 11:1:20;     % arm 두께 후보 [mm]
 yOverR_list          = 0:0.05:0.20;% arm 중심선 offset (y/R=0: 로터 중심 통과)
-zOverR_list          = 0.05:0.05:1.00; % arm 수직 위치 (z/R=0.05: 디스크 바로 아래)
+zOverR_list          = 0.272:0.05:1.00; % arm 수직 위치 (z/R=0.05: 디스크 바로 아래)
 wakeCrossMode        = "radius";   % "radius" 또는 "diameter"
 St                   = 0.20;       % Strouhal number (원형 실린더 근사)
-bladeNo              = 2;          % 프롭 블레이드 수
+bladeNo              = 3;          % 프롭 블레이드 수
 
 % 형상별 대표 항력계수 (1차 근사, 실제 값은 Re/표면/자세에 따라 다름)
 shapeName = ["circular"; "square"; "elliptic"; "streamlined"];
@@ -191,12 +191,48 @@ resultTable = cell2table(rows, 'VariableNames', { ...
 
 resultTable = sortrows(resultTable, {'ThrustLoss_pct','DeltaP_mech_W'});
 
-%% 공력 손실 최소 후보
+%% 전체 및 형상별 공력 손실 최소 후보
+
+% 전체 조합 중 공력 손실 최소 후보
 bestAeroCandidate = resultTable(1,:);
-fprintf('\n공력 손실 최소 후보\n');
+
+fprintf('\n전체 공력 손실 최소 후보\n');
 disp(bestAeroCandidate(:, {'Shape','Cd','ArmThickness_mm','y_over_R','y_mm', ...
-    'z_over_R','z_mm','ThrustLoss_pct','DeltaP_mech_W','DeltaP_mech_pct', ...
-    'Blockage_pct','v_wake','Acceptable'}));
+    'z_over_R','z_mm','ThrustLoss_pct','DeltaP_mech_pct', ...
+    'Blockage_pct','Acceptable'}));
+
+% 형상별 공력 손실 최소 후보
+shapeAeroBestRows = {};
+
+for ss = 1:length(shapeName)
+    shape = shapeName(ss);
+
+    sub = resultTable(resultTable.Shape == shape, :);
+    sub = sortrows(sub, {'ThrustLoss_pct','DeltaP_mech_W','Blockage_pct'});
+
+    tmp = sub(1,:);
+
+    shapeAeroBestRows(end+1,:) = { ...
+        tmp.Shape(1), tmp.Cd(1), tmp.ArmThickness_mm(1), ...
+        tmp.y_over_R(1), tmp.y_mm(1), ...
+        tmp.z_over_R(1), tmp.z_mm(1), ...
+        tmp.Blockage_pct(1), ...
+        tmp.ThrustLoss_pct(1), ...
+        tmp.DeltaP_mech_W(1), ...
+        tmp.Acceptable(1)};
+end
+
+shapeAeroBestTable = cell2table(shapeAeroBestRows, 'VariableNames', ...
+    {'Shape','Cd','AeroBestArmThickness_mm', ...
+     'AeroBest_y_over_R','AeroBest_y_mm', ...
+     'AeroBest_z_over_R','AeroBest_z_mm', ...
+     'Blockage_pct', ...
+     'ThrustLoss_pct', ...
+     'DeltaP_mech_W', ...
+     'Acceptable'});
+
+fprintf('\n형상별 공력 손실 최소 후보\n');
+disp(shapeAeroBestTable);
 
 %% 허용 손실률 이내 후보
 acceptableTable = resultTable(resultTable.Acceptable == true, :);
@@ -204,14 +240,12 @@ acceptableTable = resultTable(resultTable.Acceptable == true, :);
 if isempty(acceptableTable)
     warning('허용 손실률 %.2f%% 이내의 후보가 없습니다.', targetLossPct);
 else
-    % 선정 우선순위: 허용 이내 > arm 두께 최대 > 추력 손실 최소 > 추가출력 최소
-    acceptableTable.SortThicknessNeg = -acceptableTable.ArmThickness_mm;
+    % 선정 우선순위: 허용 이내 > arm 두께 최소 > 추력 손실 최소 > 추가출력 최소
     acceptableSorted = sortrows(acceptableTable, ...
-        {'SortThicknessNeg','ThrustLoss_pct','DeltaP_mech_W'});
+        {'ArmThickness_mm','ThrustLoss_pct','DeltaP_mech_W'});
     bestPracticalCandidate = acceptableSorted(1,:);
-    bestPracticalCandidate.SortThicknessNeg = [];
 
-    fprintf('\n허용 손실률 이내 최대 두께 후보\n');
+    fprintf('\n허용 손실률 이내 최소 두께 후보\n');
     disp(bestPracticalCandidate(:, {'Shape','Cd','ArmThickness_mm','y_over_R','y_mm', ...
         'z_over_R','z_mm','ThrustLoss_pct','DeltaP_mech_W','DeltaP_mech_pct', ...
         'Blockage_pct','v_wake','Acceptable'}));
@@ -229,8 +263,7 @@ for ss = 1:length(shapeName)
         continue;
     end
 
-    sub.SortThicknessNeg = -sub.ArmThickness_mm;
-    sub = sortrows(sub, {'SortThicknessNeg','ThrustLoss_pct','DeltaP_mech_W'});
+    sub = sortrows(sub, {'ArmThickness_mm','ThrustLoss_pct','DeltaP_mech_W'});
     tmp = sub(1,:);
 
     shapeBestRows(end+1,:) = { ...
@@ -246,7 +279,7 @@ shapeBestTable = cell2table(shapeBestRows, 'VariableNames', ...
      'Best_z_over_R','Best_z_mm','ThrustLoss_pct','DeltaP_mech_W', ...
      'Blockage_pct','HasAcceptableCandidate'});
 
-fprintf('\n형상별 최적 후보 — 허용 손실률 이내 최대 두께 우선\n');
+fprintf('\n형상별 최적 후보 — 허용 손실률 이내 최소 두께 우선\n');
 disp(shapeBestTable);
 
 %% 형상별 최대 허용 arm 두께
@@ -341,7 +374,7 @@ fprintf('   Thrust loss=%.4f%%, DeltaP=%.4f W/rotor\n', ...
     bestAeroCandidate.ThrustLoss_pct, bestAeroCandidate.DeltaP_mech_W);
 
 if ~isempty(acceptableTable)
-    fprintf('\n2) 허용 손실률 %.1f%% 이내 최대 두께 후보\n', targetLossPct);
+    fprintf('\n2) 허용 손실률 %.1f%% 이내 최소 두께 후보\n', targetLossPct);
     fprintf('   Shape=%s, arm=%.1fmm, y/R=%.2f, z/R=%.2f\n', ...
         bestPracticalCandidate.Shape, bestPracticalCandidate.ArmThickness_mm, ...
         bestPracticalCandidate.y_over_R, bestPracticalCandidate.z_over_R);
@@ -386,57 +419,24 @@ yline(targetLossPct, 'k--', 'Target loss');
 hold off; grid on;
 xlabel('Arm thickness or frontal height [mm]');
 ylabel('Minimum thrust loss [%]');
+ylim([0 4]);
 title(sprintf('형상별 arm 두께에 따른 최소 추력 손실률 — %s', analysis_mode));
 legend(shapeName, 'Location','northwest');
 
-% Fig 2. 형상별 최대 허용 두께
-figure('Name','Max allowable arm thickness', 'Position',[120 120 800 480]);
-bar(categorical(maxThicknessTable.Shape), maxThicknessTable.MaxAllowableThickness_mm);
-grid on;
-ylabel('Maximum allowable arm thickness [mm]');
-title(sprintf('형상별 최대 허용 arm 두께 (target loss %.1f%%) — %s', ...
-    targetLossPct, analysis_mode));
-
-% Fig 3. Offset 효과
-figure('Name','Thrust loss vs y/R offset', 'Position',[140 140 900 520]);
-hold on;
-for ss = 1:length(shapeName)
-    shape      = shapeName(ss);
-    minLossByY = nan(size(yOverR_list));
-    for yy = 1:length(yOverR_list)
-        sub = resultTable(resultTable.Shape == shape & ...
-                          resultTable.y_over_R == yOverR_list(yy), :);
-        minLossByY(yy) = min(sub.ThrustLoss_pct);
-    end
-    plot(yOverR_list, minLossByY, 'LineWidth', 1.6);
+outDir = 'results_arm_wake';
+if ~exist(outDir, 'dir')
+    mkdir(outDir);
 end
-yline(targetLossPct, 'k--', 'Target loss');
-hold off; grid on;
-xlabel('Arm offset y/R [-]');
-ylabel('Minimum thrust loss [%]');
-title('arm offset 증가에 따른 최소 추력 손실률');
-legend(shapeName, 'Location','northeast');
 
-% Fig 4. z/R 영향
-figure('Name','Thrust loss vs z/R position', 'Position',[160 160 900 520]);
-hold on;
-for ss = 1:length(shapeName)
-    shape      = shapeName(ss);
-    minLossByZ = nan(size(zOverR_list));
-    for zz = 1:length(zOverR_list)
-        sub = resultTable(resultTable.Shape == shape & ...
-                          resultTable.z_over_R == zOverR_list(zz), :);
-        minLossByZ(zz) = min(sub.ThrustLoss_pct);
-    end
-    plot(zOverR_list, minLossByZ, 'LineWidth', 1.6);
-end
-yline(targetLossPct, 'k--', 'Target loss');
-hold off; grid on;
-xlabel('Vertical distance z/R [-]');
-ylabel('Minimum thrust loss [%]');
-title('arm 수직 위치 z/R에 따른 최소 추력 손실률');
-legend(shapeName, 'Location','northwest');
+outFile = fullfile(outDir, 'arm_wake_analysis_result.xlsx');
 
+writetable(resultTable,        outFile, 'Sheet', 'All Results');
+writetable(shapeBestTable,     outFile, 'Sheet', 'Best by Shape');
+writetable(maxThicknessTable,  outFile, 'Sheet', 'Max Thickness');
+writetable(minOffsetTable,     outFile, 'Sheet', 'Min Offset');
+writetable(zEffectTable,       outFile, 'Sheet', 'Z Effect');
+
+fprintf('\n결과 저장 완료: %s\n', outFile);
 %% =========================================================================
 % 로컬 함수
 function out = calcArmWakeResult( ...

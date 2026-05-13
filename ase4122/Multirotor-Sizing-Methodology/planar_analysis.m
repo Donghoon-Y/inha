@@ -55,7 +55,7 @@ end
 twr = ThrustWeightRatio;
 
 fprintf('\n==============================\n');
-fprintf(' Planar/Non-Planar 통합 분석 시작\n');
+fprintf(' Planar 통합 분석 시작\n');
 fprintf(' (렘니스케이트 단면 기반)\n');
 fprintf('==============================\n');
 fprintf('설계안          : %s\n', analysis_mode);
@@ -76,7 +76,7 @@ arm_thrustloss = bestPracticalCandidate.ThrustLoss_pct;    % 추력 손실 [%]
 
 %── 렘니스케이트 치수
 tw           = 1.0;              % 벽 두께 [mm]
-rho_carbon   = 1.55e-3;          % 카본 밀도 [g/mm³]
+rho_carbon   = 1.8e-3;          % 카본 밀도 [g/mm³]
 
 a_outer      = w_mm;   % 외곽 a
 a_inner      = a_outer - tw;     % 내부 a (벽 두께 반영)
@@ -109,13 +109,16 @@ s_ref    = 3.0;   % 기준 spacing (논문 결론값)
 base_arm = 250;   % 기준 암 길이 [mm] (S500 기준)
 n_arms   = 4;
 
-%── 암 길이 계산 함수: L/R = (2L/25.4) / (2·d_prop) → L = s·d_prop·25.4/√2 / 2
-arm_fn = @(x) (((x / 25.4) / 2) * sqrt(2)) / d_prop;
-L_ref  = fzero(@(x) arm_fn(x) - s_ref, [0.001, 1000]) / 2;
+%── 암 길이 계산 (중심→프롭)
+%   정의: L/R = L / R,  L = arm 1개 길이 [mm]
+%   정사각형 배치: 인접 로터 간 거리 = L×√2
+%   → L = s_ref × R_mm / √2  = s_ref × d_prop × 25.4 / √2
+L_ref = s_ref * d_prop * 25.4 / sqrt(2);   % arm 1개 길이 (중심→프롭) [mm]
 
-fprintf('암 길이 (중심→프롭) : %.0f mm\n', L_ref);
-fprintf('대각 프롭 간 거리   : %.0f mm\n', 2 * L_ref);
-fprintf('늘어난 암 길이      : %+.0f mm  (기준 %d mm 대비)\n', L_ref - base_arm, base_arm);
+fprintf('암 길이 (중심→프롭) : %.1f mm\n', L_ref);
+fprintf('인접 로터 간 거리   : %.1f mm  (= L×√2)\n', L_ref * sqrt(2));
+fprintf('대각 로터 간 거리   : %.1f mm  (= L×2)\n',   L_ref * 2);
+fprintf('늘어난 암 길이      : %+.1f mm  (기준 %d mm 대비)\n', L_ref - base_arm, base_arm);
 fprintf('------------------------------\n\n');
 
 %% ========================================================================
@@ -138,7 +141,7 @@ increment_data_p = [
 avg_inc_p = mean(increment_data_p, 2);  % spacing별 평균 증가율
 
 %── 렘니스케이트 단면 기반 암 무게 증분
-arm_len_p    = spacings_p * d_prop * 25.4 / sqrt(2);   % spacing별 암 길이 [mm]
+arm_len_p    = spacings_p * d_prop * 25.4 / sqrt(2);   % arm 1개 길이(중심→프롭) [mm]  % 2단계 L_ref와 동일 정의
 delta_arm_p  = arm_len_p - base_arm;                    % 기준 대비 증분 [mm]
 add_wt_p     = n_arms * delta_arm_p * weight_per_mm;    % 추가 암 무게 [g]
 
@@ -207,9 +210,9 @@ hold off;
 
 
 %% ========================================================================
-%% [5단계] 최종 확정 무게 출력 (권장 spacing 기준)
+%% [4단계] 최종 확정 무게 출력 (권장 spacing 기준)
 %% ========================================================================
-fprintf('=== 5단계: 최종 확정 무게 (권장 spacing 기준) ===\n\n');
+fprintf('=== 4단계: 최종 확정 무게 (권장 spacing 기준) ===\n\n');
 
 %── Planar 최종 확정 무게
 if exist('best_i_p','var')
@@ -220,7 +223,7 @@ if exist('best_i_p','var')
 
     fprintf('[Planar 최종 확정]\n');
     fprintf('  권장 spacing      : %s\n',      lr_labels{best_i_p});
-    fprintf('  암 길이 (1개)     : %.1f mm\n', best_arm_len_p);
+    fprintf('  암 길이 (1개)     : %.0f mm\n', best_arm_len_p);
     fprintf('  암 4개 총 무게    : %.1f g   (%.4f g/mm × %.0f mm × 4)\n', ...
             best_arm_wt_p, weight_per_mm, best_arm_len_p);
     fprintf('  암 무게 증분      : %+.1f g  (기준 암 대비)\n', best_arm_delta_p);
@@ -230,31 +233,10 @@ if exist('best_i_p','var')
     fprintf('  │  ─────────────────────────────────  │\n');
     fprintf('  │  최종 AUM (Planar)  : %8.1f g    │\n', final_aum_p);
     fprintf('  └─────────────────────────────────────┘\n\n');
+    fprintf('  [export] best_arm_len_p = %.1f mm  (arm 1개, 중심→프롭) → ground_effect_analysis\n', best_arm_len_p);
+    fprintf('  [export] final_aum_p    = %.1f g   (암 포함 최종 AUM)   → ground_effect_analysis\n\n', final_aum_p);
 else
     fprintf('[경고] Planar 권장 spacing 없음 — 최종 무게 산출 불가\n\n');
-end
-
-%── Non-Planar 최종 확정 무게
-if exist('best_i_n','var')
-    best_arm_len_n   = arm_len_n(best_i_n);
-    best_arm_wt_n    = n_arms * best_arm_len_n * weight_per_mm;
-    best_arm_delta_n = add_wt_n(best_i_n);
-    final_aum_n      = total_aum_n(best_i_n);
-
-    fprintf('[Non-Planar 최종 확정]\n');
-    fprintf('  권장 l/d          : %s\n',      ld_lbl{best_i_n});
-    fprintf('  암 길이 (1개)     : %.1f mm\n', best_arm_len_n);
-    fprintf('  암 4개 총 무게    : %.1f g   (%.4f g/mm × %.0f mm × 4)\n', ...
-            best_arm_wt_n, weight_per_mm, best_arm_len_n);
-    fprintf('  암 무게 증분      : %+.1f g  (기준 암 대비)\n', best_arm_delta_n);
-    fprintf('  ┌─────────────────────────────────────┐\n');
-    fprintf('  │  기본 AUM (전장품)  : %8.1f g    │\n', base_aum);
-    fprintf('  │  + 암 무게 증분     : %+8.1f g    │\n', best_arm_delta_n);
-    fprintf('  │  ─────────────────────────────────  │\n');
-    fprintf('  │  최종 AUM (Non-P)   : %8.1f g    │\n', final_aum_n);
-    fprintf('  └─────────────────────────────────────┘\n\n');
-else
-    fprintf('[경고] Non-Planar 권장 l/d 없음 — 최종 무게 산출 불가\n\n');
 end
 
 %% ========================================================================

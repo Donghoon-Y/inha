@@ -1,0 +1,140 @@
+CASEID CG1ALT0
+ $FLTCON NALPHA = 5.,
+         ALPHA = 0., 5., 10., 15., 20.,
+         NMACH = 5.,
+         MACH = 0.5, 1.0, 1.5, 2.0, 2.5,
+         ALT = 0., 0., 0., 0., 0., $
+ $REFQ XCG = 1.0,$
+ $AXIBOD TNOSE = OGIVE,
+         LNOSE = 0.7788,
+         DNOSE = 0.343,
+         LCENTR = 3.9412,
+         DCENTR = 0.343,
+         DEXIT = 0.343,$
+ $FINSET1 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.21722, 0.21723, 0.3112,
+          CHORD = 2.286,  2.1482,  1.44462, 1.22682,
+          XLE =   1.652,  1.73119, 2.43477, 2.53209,$
+ $FINSET2 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.53726,
+          CHORD = 0.3776, 0.01,
+          XLE   = 4.3424, 4.48997,$
+DIM M
+DERIV DEG
+DAMP
+SAVE
+NEXT CASE
+CASEID CG1ALT2
+ $FLTCON NALPHA = 5.,
+         ALPHA = 0., 5., 10., 15., 20.,
+         NMACH = 5.,
+         MACH = 0.5, 1.0, 1.5, 2.0, 2.5,
+         ALT = 2000., 2000., 2000., 2000., 2000., $
+ $REFQ XCG = 1.0,$
+ $AXIBOD TNOSE = OGIVE,
+         LNOSE = 0.7788,
+         DNOSE = 0.343,
+         LCENTR = 3.9412,
+         DCENTR = 0.343,
+         DEXIT = 0.343,$
+ $FINSET1 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.21722, 0.21723, 0.3112,
+          CHORD = 2.286,  2.1482,  1.44462, 1.22682,
+          XLE =   1.652,  1.73119, 2.43477, 2.53209,$
+ $FINSET2 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.53726,
+          CHORD = 0.3776, 0.01,
+          XLE   = 4.3424, 4.48997,$
+DIM M
+DERIV DEG
+DAMP
+SAVE
+NEXT CASE
+CASEID CG1ALT5
+ $FLTCON NALPHA = 5.,
+         ALPHA = 0., 5., 10., 15., 20.,
+         NMACH = 5.,
+         MACH = 0.5, 1.0, 1.5, 2.0, 2.5,
+         ALT = 5000., 5000., 5000., 5000., 5000., $
+ $REFQ XCG = 1.0,$
+ $AXIBOD TNOSE = OGIVE,
+         LNOSE = 0.7788,
+         DNOSE = 0.343,
+         LCENTR = 3.9412,
+         DCENTR = 0.343,
+         DEXIT = 0.343,$
+ $FINSET1 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.21722, 0.21723, 0.3112,
+          CHORD = 2.286,  2.1482,  1.44462, 1.22682,
+          XLE =   1.652,  1.73119, 2.43477, 2.53209,$
+ $FINSET2 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.53726,
+          CHORD = 0.3776, 0.01,
+          XLE   = 4.3424, 4.48997,$
+DIM M
+DERIV DEG
+DAMP
+SAVE
+NEXT CASE
+CASEID CG1ALT10
+ $FLTCON NALPHA = 5.,
+         ALPHA = 0., 5., 10., 15., 20.,
+         NMACH = 5.,
+         MACH = 0.5, 1.0, 1.5, 2.0, 2.5,
+         ALT = 10000., 10000., 10000., 10000., 10000., $
+ $REFQ XCG = 1.0,$
+ $AXIBOD TNOSE = OGIVE,
+         LNOSE = 0.7788,
+         DNOSE = 0.343,
+         LCENTR = 3.9412,
+         DCENTR = 0.343,
+         DEXIT = 0.343,$
+ $FINSET1 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.21722, 0.21723, 0.3112,
+          CHORD = 2.286,  2.1482,  1.44462, 1.22682,
+          XLE =   1.652,  1.73119, 2.43477, 2.53209,$
+ $FINSET2 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.53726,
+          CHORD = 0.3776, 0.01,
+          XLE   = 4.3424, 4.48997,$
+DIM M
+DERIV DEG
+DAMP
+SAVE
+NEXT CASE
+CASEID CG1ALT20
+ $FLTCON NALPHA = 5.,
+         ALPHA = 0., 5., 10., 15., 20.,
+         NMACH = 5.,
+         MACH = 0.5, 1.0, 1.5, 2.0, 2.5,
+         ALT = 20000., 20000., 20000., 20000., 20000., $
+ $REFQ XCG = 1.0,$
+ $AXIBOD TNOSE = OGIVE,
+         LNOSE = 0.7788,
+         DNOSE = 0.343,
+         LCENTR = 3.9412,
+         DCENTR = 0.343,
+         DEXIT = 0.343,$
+ $FINSET1 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.21722, 0.21723, 0.3112,
+          CHORD = 2.286,  2.1482,  1.44462, 1.22682,
+          XLE =   1.652,  1.73119, 2.43477, 2.53209,$
+ $FINSET2 NPANEL = 4.,
+          PHIF = 0., 90., 180., 270.,
+          SSPAN = 0.1715, 0.53726,
+          CHORD = 0.3776, 0.01,
+          XLE   = 4.3424, 4.48997,$
+DIM M
+DERIV DEG
+DAMP
+SAVE
+NEXT CASE

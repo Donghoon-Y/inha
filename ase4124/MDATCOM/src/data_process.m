@@ -14,8 +14,7 @@ alt_list  = [0, 2, 5, 10, 20];
 alt_names = {'ALT0','ALT2','ALT5','ALT10','ALT20'};
 alt_str   = {'ALT=0m','ALT=2km','ALT=5km','ALT=10km','ALT=20km'};
 
-% 물성치
-S    = 0.092;   d    = 0.343;
+% 물성치 (S, d는 DATCOM output에서 파싱 → blk.S, blk.d)
 mass = [707.618, 707.493];
 Iyy  = [1063.369, 1645.475];
 r2d  = 180/pi;
@@ -54,7 +53,7 @@ for cg = 1:2
         draw_one_alt_tab(fig, dat, cidx, nd_fields, nd_labels, ...
                          dm_fields, dm_labels, ...
                          mach_list, c_mach, mk, ...
-                         m, Iy, S, d, r2d, ...
+                         m, Iy, r2d, ...
                          sprintf('%s (%s)  Mach별', cg_prefix{cg}, alt_str{ai}));
     end
 end
@@ -73,7 +72,7 @@ draw_compare_nd(fig, nd_fields, nd_labels, ...
 fig = figure();
 draw_compare_dim(fig, dm_fields, dm_labels, ...
     data_cg1, i1, data_cg2, i2, ...
-    mass, Iyy, S, d, r2d, ...
+    mass, Iyy, r2d, ...
     mach_list, c_mach, mk, ...
     'CG1 vs CG2  유차원  |  ALT=0m  |  실선=CG1  점선=CG2');
 
@@ -84,7 +83,7 @@ fprintf('완료. Figure %d개 생성.\n', length(alt_list)*2 + 2);
 %% ================================================================
 function draw_one_alt_tab(fig, dat, cidx, nd_f, nd_l, dm_f, dm_l, ...
                            mach_list, colors, mk, ...
-                           m, Iy, S, d, r2d, ttl)
+                           m, Iy, r2d, ttl)
     nf = length(nd_f);  % 6
     nd = length(dm_f);  % 6
     total = nf + nd;    % 12 → 2x6 배치
@@ -122,6 +121,8 @@ function draw_one_alt_tab(fig, dat, cidx, nd_f, nd_l, dm_f, dm_l, ...
             if isempty(blk), continue; end
             q   = blk.q;    % DATCOM 출력에서 파싱한 동압 [N/m²]
             U0  = blk.vel;  % DATCOM 출력에서 파싱한 속도 [m/s]
+            S   = blk.S;    % DATCOM 출력에서 파싱한 기준 면적 [m²]
+            d   = blk.d;    % DATCOM 출력에서 파싱한 기준 길이 [m]
             v = calc_one_dim(blk, dm_f{fi}, q, S, d, m, Iy, U0, r2d);
             if ~isempty(v) && ~all(v==0)
                 h = plot(ax, blk.alpha, v, ['-' mk{mi}],'Color',colors(mi,:),...
@@ -182,7 +183,7 @@ end
 %% CG1 vs CG2 유차원 비교
 %% ================================================================
 function draw_compare_dim(fig, dm_f, dm_l, dat1, idx1, dat2, idx2, ...
-                           mass, Iyy, S, d, r2d, ...
+                           mass, Iyy, r2d, ...
                            mach_list, colors, mk, ttl)
     colors2 = [0.60 0.75 0.90;   % 연파랑
              0.95 0.76 0.50;   % 연주황
@@ -201,6 +202,8 @@ function draw_compare_dim(fig, dm_f, dm_l, dat1, idx1, dat2, idx2, ...
                 if isempty(blk), continue; end
                 q   = blk.q;    % DATCOM 출력에서 파싱한 동압 [N/m²]
                 U0  = blk.vel;  % DATCOM 출력에서 파싱한 속도 [m/s]
+                S   = blk.S;    % DATCOM 출력에서 파싱한 기준 면적 [m²]
+                d   = blk.d;    % DATCOM 출력에서 파싱한 기준 길이 [m]
                 v = calc_one_dim(blk,dm_f{fi},q,S,d,mass(cg),Iyy(cg),U0,r2d);
                 if ~isempty(v)&&~all(v==0)
                     if cg==1; ls_='-'; col=colors(mi,:); else; ls_='--'; col=colors2(mi,:); end
@@ -287,14 +290,18 @@ function data = parse_datcom(filename)
             for k=i+1:min(i+8,length(raw))
                 if ~ischar(raw{k}), continue; end
                 nums=sscanf(strtrim(raw{k}),'%f');
-                if length(nums)>=4
+                if length(nums)>=10
                     mach_val = nums(1);
-                    vel_val  = nums(3);   % 비행속도 [m/s]
-                    q_val    = nums(4);   % 동압 [N/m²]
+                    vel_val  = nums(3);    % 비행속도 [m/s]
+                    q_val    = nums(4);    % 동압 [N/m²]
+                    S_val    = nums(9);    % 기준 면적 [m²]
+                    d_val    = nums(10);   % 기준 길이 (직경) [m]
                     for mb=1:length(data(cidx).mach_blocks)
                         if abs(data(cidx).mach_blocks(mb).mach-mach_val)<0.01
                             data(cidx).mach_blocks(mb).q   = q_val;
                             data(cidx).mach_blocks(mb).vel = vel_val;
+                            data(cidx).mach_blocks(mb).S   = S_val;
+                            data(cidx).mach_blocks(mb).d   = d_val;
                             break;
                         end
                     end

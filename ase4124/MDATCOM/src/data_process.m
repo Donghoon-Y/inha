@@ -14,10 +14,6 @@ alt_list  = [0, 2, 5, 10, 20];
 alt_names = {'ALT0','ALT2','ALT5','ALT10','ALT20'};
 alt_str   = {'ALT=0m','ALT=2km','ALT=5km','ALT=10km','ALT=20km'};
 
-% 표준대기 (각 고도별 rho, a)
-alt_rho = [1.2250, 1.0066, 0.7364, 0.4135, 0.0889];
-alt_a   = [340.29, 332.53, 320.55, 299.53, 295.07];
-
 % 물성치
 S    = 0.092;   d    = 0.343;
 mass = [707.618, 707.493];
@@ -42,11 +38,7 @@ dm_labels = {'Z [N]','M [N·m]','X [N]','Za [m/s^2/rad]','Ma [1/s^2]','Mq [1/s]'
 data_all  = {data_cg1, data_cg2};
 cg_prefix = {'CG1','CG2'};
 
-%% ===== Figure =====
-fig = figure('Name','Datcom 공력계수','NumberTitle','off','Position',[60 60 1380 820]);
-tg  = uitabgroup(fig);
-
-%% ===== CG1, CG2 각각 고도별 탭 =====
+%% ===== CG1, CG2 각각 고도별 Figure =====
 for cg = 1:2
     dat = data_all{cg};
     m   = mass(cg);
@@ -55,55 +47,50 @@ for cg = 1:2
     for ai = 1:length(alt_list)
         caseid = [cg_prefix{cg} alt_names{ai}];
         cidx   = find_case(dat, caseid);
-        rho    = alt_rho(ai);
-        a0     = alt_a(ai);
 
-        tab_title = sprintf('%s  %s', cg_prefix{cg}, alt_str{ai});
-        t = uitab(tg, 'Title', tab_title);
+        fig_title = sprintf('%s  %s', cg_prefix{cg}, alt_str{ai});
+        fig = figure();
 
-        % 무차원 + 유차원을 한 탭에 2행으로:
-        % 위 2행(1~6): 무차원 CN,CM,CA,CNA,CMA,CMq
-        % 아래 2행(7~12): 유차원 Z,M,X,Za,Ma,Mq
-        draw_one_alt_tab(t, dat, cidx, nd_fields, nd_labels, ...
+        draw_one_alt_tab(fig, dat, cidx, nd_fields, nd_labels, ...
                          dm_fields, dm_labels, ...
                          mach_list, c_mach, mk, ...
-                         m, Iy, S, d, rho, a0, r2d, ...
+                         m, Iy, S, d, r2d, ...
                          sprintf('%s (%s)  Mach별', cg_prefix{cg}, alt_str{ai}));
     end
 end
 
-%% ===== CG1 vs CG2 비교 탭 (ALT=0, 무차원) =====
+%% ===== CG1 vs CG2 비교 Figure (ALT=0, 무차원) =====
 i1 = find_case(data_cg1,'CG1ALT0');
 i2 = find_case(data_cg2,'CG2ALT0');
 
-t = uitab(tg,'Title','CG1 vs CG2 nd (ALT0)');
-draw_compare_nd(t, nd_fields, nd_labels, ...
+fig = figure();
+draw_compare_nd(fig, nd_fields, nd_labels, ...
     data_cg1, i1, data_cg2, i2, ...
     mach_list, c_mach, mk, ...
     'CG1 vs CG2  무차원  |  ALT=0m  |  실선=CG1  점선=CG2');
 
-%% ===== CG1 vs CG2 비교 탭 (ALT=0, 유차원) =====
-t = uitab(tg,'Title','CG1 vs CG2 dim (ALT0)');
-draw_compare_dim(t, dm_fields, dm_labels, ...
+%% ===== CG1 vs CG2 비교 Figure (ALT=0, 유차원) =====
+fig = figure();
+draw_compare_dim(fig, dm_fields, dm_labels, ...
     data_cg1, i1, data_cg2, i2, ...
-    mass, Iyy, S, d, alt_rho(1), alt_a(1), r2d, ...
+    mass, Iyy, S, d, r2d, ...
     mach_list, c_mach, mk, ...
     'CG1 vs CG2  유차원  |  ALT=0m  |  실선=CG1  점선=CG2');
 
-fprintf('완료. 탭 %d개 생성.\n', length(alt_list)*2 + 2);
+fprintf('완료. Figure %d개 생성.\n', length(alt_list)*2 + 2);
 
 %% ================================================================
 %% 무차원(위) + 유차원(아래) 그리기
 %% ================================================================
-function draw_one_alt_tab(tab, dat, cidx, nd_f, nd_l, dm_f, dm_l, ...
+function draw_one_alt_tab(fig, dat, cidx, nd_f, nd_l, dm_f, dm_l, ...
                            mach_list, colors, mk, ...
-                           m, Iy, S, d, rho, a0, r2d, ttl)
+                           m, Iy, S, d, r2d, ttl)
     nf = length(nd_f);  % 6
     nd = length(dm_f);  % 6
     total = nf + nd;    % 12 → 2x6 배치
 
     for fi = 1:nf
-        ax = subplot(4, 3, fi, 'Parent', tab);
+        ax = subplot(4, 3, fi, 'Parent', fig);
         hold(ax,'on'); grid(ax,'on'); box(ax,'on');
         lh=[]; ls={};
         for mi = 1:length(mach_list)
@@ -126,15 +113,15 @@ function draw_one_alt_tab(tab, dat, cidx, nd_f, nd_l, dm_f, dm_l, ...
     end
 
     for fi = 1:nd
-        ax = subplot(4, 3, nf+fi, 'Parent', tab);
+        ax = subplot(4, 3, nf+fi, 'Parent', fig);
         hold(ax,'on'); grid(ax,'on'); box(ax,'on');
         lh=[]; ls={};
         for mi = 1:length(mach_list)
-            Mv = mach_list(mi);
-            U0 = Mv * a0;
-            q  = 0.5 * rho * U0^2;
+            Mv  = mach_list(mi);
             blk = get_block(dat, cidx, Mv);
             if isempty(blk), continue; end
+            q   = blk.q;    % DATCOM 출력에서 파싱한 동압 [N/m²]
+            U0  = blk.vel;  % DATCOM 출력에서 파싱한 속도 [m/s]
             v = calc_one_dim(blk, dm_f{fi}, q, S, d, m, Iy, U0, r2d);
             if ~isempty(v) && ~all(v==0)
                 h = plot(ax, blk.alpha, v, ['-' mk{mi}],'Color',colors(mi,:),...
@@ -151,15 +138,13 @@ function draw_one_alt_tab(tab, dat, cidx, nd_f, nd_l, dm_f, dm_l, ...
         end
     end
 
-    annotation(tab,'textbox',[0 0.96 1 0.04],'String',ttl,...
-        'EdgeColor','none','HorizontalAlignment','center',...
-        'FontSize',10,'FontWeight','bold','Interpreter','none');
+    sgtitle(fig, ttl, 'FontSize', 11, 'FontWeight', 'bold', 'Interpreter', 'none');
 end
 
 %% ================================================================
 %% CG1 vs CG2 무차원 비교
 %% ================================================================
-function draw_compare_nd(tab, nd_f, nd_l, dat1, idx1, dat2, idx2, ...
+function draw_compare_nd(fig, nd_f, nd_l, dat1, idx1, dat2, idx2, ...
                           mach_list, colors, mk, ttl)
     c2 = [0.60 0.75 0.90;   % 연파랑
            0.95 0.76 0.50;   % 연주황
@@ -167,7 +152,7 @@ function draw_compare_nd(tab, nd_f, nd_l, dat1, idx1, dat2, idx2, ...
            0.82 0.72 0.90;   % 연보라
            0.95 0.65 0.65];  % 연빨강
     for fi = 1:length(nd_f)
-        ax = subplot(2,3,fi,'Parent',tab);
+        ax = subplot(2,3,fi,'Parent',fig);
         hold(ax,'on'); grid(ax,'on'); box(ax,'on');
         lh=[]; ls={};
         for mi = 1:length(mach_list)
@@ -190,16 +175,14 @@ function draw_compare_nd(tab, nd_f, nd_l, dat1, idx1, dat2, idx2, ...
             legend(ax,lh,ls,'Location','best','FontSize',7,'NumColumns',2,'Interpreter','none');
         end
     end
-    annotation(tab,'textbox',[0 0.96 1 0.04],'String',ttl,...
-        'EdgeColor','none','HorizontalAlignment','center',...
-        'FontSize',10,'FontWeight','bold','Interpreter','none');
+    sgtitle(fig, ttl, 'FontSize', 11, 'FontWeight', 'bold', 'Interpreter', 'none');
 end
 
 %% ================================================================
 %% CG1 vs CG2 유차원 비교
 %% ================================================================
-function draw_compare_dim(tab, dm_f, dm_l, dat1, idx1, dat2, idx2, ...
-                           mass, Iyy, S, d, rho, a0, r2d, ...
+function draw_compare_dim(fig, dm_f, dm_l, dat1, idx1, dat2, idx2, ...
+                           mass, Iyy, S, d, r2d, ...
                            mach_list, colors, mk, ttl)
     colors2 = [0.60 0.75 0.90;   % 연파랑
              0.95 0.76 0.50;   % 연주황
@@ -207,17 +190,17 @@ function draw_compare_dim(tab, dm_f, dm_l, dat1, idx1, dat2, idx2, ...
              0.82 0.72 0.90;   % 연보라
              0.95 0.65 0.65];  % 연빨강
     for fi = 1:length(dm_f)
-        ax = subplot(2,3,fi,'Parent',tab);
+        ax = subplot(2,3,fi,'Parent',fig);
         hold(ax,'on'); grid(ax,'on'); box(ax,'on');
         lh=[]; ls={};
         for mi = 1:length(mach_list)
             Mv = mach_list(mi);
-            U0 = Mv * a0;
-            q  = 0.5 * rho * U0^2;
             for cg = 1:2
                 if cg==1; dat=dat1; cidx=idx1; else; dat=dat2; cidx=idx2; end
                 blk = get_block(dat,cidx,Mv);
                 if isempty(blk), continue; end
+                q   = blk.q;    % DATCOM 출력에서 파싱한 동압 [N/m²]
+                U0  = blk.vel;  % DATCOM 출력에서 파싱한 속도 [m/s]
                 v = calc_one_dim(blk,dm_f{fi},q,S,d,mass(cg),Iyy(cg),U0,r2d);
                 if ~isempty(v)&&~all(v==0)
                     if cg==1; ls_='-'; col=colors(mi,:); else; ls_='--'; col=colors2(mi,:); end
@@ -236,9 +219,7 @@ function draw_compare_dim(tab, dm_f, dm_l, dat1, idx1, dat2, idx2, ...
             legend(ax,lh,ls,'Location','best','FontSize',7,'NumColumns',2,'Interpreter','none');
         end
     end
-    annotation(tab,'textbox',[0 0.96 1 0.04],'String',ttl,...
-        'EdgeColor','none','HorizontalAlignment','center',...
-        'FontSize',10,'FontWeight','bold','Interpreter','none');
+    sgtitle(fig, ttl, 'FontSize', 11, 'FontWeight', 'bold', 'Interpreter', 'none');
 end
 
 %% ================================================================
@@ -246,39 +227,38 @@ end
 %% ================================================================
 function v = calc_one_dim(blk, field, q, S, d, m, Iy, U0, r2d)
     n   = length(blk.alpha);
-    v   = zeros(n,1);
-    fF  = q*S;
-    fMo = q*S*d;
-    fZa = q*S/m;
-    fMa = q*S*d/Iy;
-    fMq = fMa*d/(2*U0);
-    for k=1:n
-        switch field
-            case 'Z'
-                if ~isempty(blk.CN)&&length(blk.CN)>=k
-                    v(k) = fF * blk.CN(k);
-                end
-            case 'M'
-                if ~isempty(blk.CM)&&length(blk.CM)>=k
-                    v(k) = fMo * blk.CM(k);
-                end
-            case 'X'
-                if ~isempty(blk.CA)&&length(blk.CA)>=k
-                    v(k) = fF * blk.CA(k);
-                end
-            case 'Za'
-                if ~isempty(blk.CNA)&&length(blk.CNA)>=k
-                    v(k) = -fZa * blk.CNA(k) * r2d;
-                end
-            case 'Ma'
-                if ~isempty(blk.CMA)&&length(blk.CMA)>=k
-                    v(k) = fMa * blk.CMA(k) * r2d;
-                end
-            case 'Mq'
-                if ~isempty(blk.CMQ)&&length(blk.CMQ)>=k
-                    v(k) = fMq * blk.CMQ(k) * r2d;
-                end
-        end
+    v   = zeros(n, 1);      % 미리 zeros로 할당
+    fF  = q * S;
+    fMo = q * S * d;
+    fZa = q * S / m;
+    fMa = q * S * d / Iy;
+    fMq = fMa * d / (2 * U0);
+
+    switch field
+        case 'Z'
+            if ~isempty(blk.CN)
+                v = fF * blk.CN;
+            end
+        case 'M'
+            if ~isempty(blk.CM)
+                v = fMo * blk.CM;
+            end
+        case 'X'
+            if ~isempty(blk.CA)
+                v = fF * blk.CA;
+            end
+        case 'Za'
+            if ~isempty(blk.CNA)
+                v = -fZa * blk.CNA * r2d;
+            end
+        case 'Ma'
+            if ~isempty(blk.CMA)
+                v = fMa * blk.CMA * r2d;
+            end
+        case 'Mq'
+            if ~isempty(blk.CMQ)
+                v = fMq * blk.CMQ * r2d;
+            end
     end
 end
 
@@ -302,6 +282,25 @@ function data = parse_datcom(filename)
             data(cidx).caseid=tok{1}{1};
             data(cidx).mach_blocks=struct([]);
             i=i+1; continue;
+        end
+        if cidx>0&&~isempty(regexp(line,'FLIGHT CONDITIONS','once'))
+            for k=i+1:min(i+8,length(raw))
+                if ~ischar(raw{k}), continue; end
+                nums=sscanf(strtrim(raw{k}),'%f');
+                if length(nums)>=4
+                    mach_val = nums(1);
+                    vel_val  = nums(3);   % 비행속도 [m/s]
+                    q_val    = nums(4);   % 동압 [N/m²]
+                    for mb=1:length(data(cidx).mach_blocks)
+                        if abs(data(cidx).mach_blocks(mb).mach-mach_val)<0.01
+                            data(cidx).mach_blocks(mb).q   = q_val;
+                            data(cidx).mach_blocks(mb).vel = vel_val;
+                            break;
+                        end
+                    end
+                    break;
+                end
+            end
         end
         if cidx>0&&~isempty(regexp(line,'STATIC AERODYNAMICS FOR BODY','once'))
             mach_val=search_mach(raw,i,+1);

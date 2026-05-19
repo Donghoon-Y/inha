@@ -8,20 +8,12 @@ cd(work_dir);
 
 input_files = {
     'cg1_input.txt',
-    'cg2_input.txt',
-    'cg1_delta_input.txt',       % DAMP → CMQ용
-    'cg2_delta_input.txt',       % DAMP → CMQ용
-    'cg1_trim_input.txt',  % TRIM → CM, CN용
-    'cg2_trim_input.txt'   % TRIM → CM, CN용
+    'cg2_input.txt'
 };
 
 output_files = {
     'cg1_output.txt',
-    'cg2_output.txt',
-    'cg1_delta_output.txt',
-    'cg2_delta_output.txt',
-    'cg1_trim_output.txt',
-    'cg2_trim_output.txt'
+    'cg2_output.txt'
 };
 
 %% 실행 루프

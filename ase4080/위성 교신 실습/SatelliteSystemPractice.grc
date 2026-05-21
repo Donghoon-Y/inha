@@ -1,0 +1,127 @@
+options:
+  parameters:
+    author: ''
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: ''
+    copyright: ''
+    description: ''
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: SatelliteSystemPractice
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: Not titled yet
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: '48000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 12]
+    rotation: 0
+    state: enabled
+- name: blocks_message_debug_0
+  id: blocks_message_debug
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    en_uvec: 'True'
+    log_level: info
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1064, 120.0]
+    rotation: 0
+    state: enabled
+- name: blocks_wavfile_source_0
+  id: blocks_wavfile_source
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    file: C:\Users\whdyd\Desktop\Practice\audio\satnogs_13951160_2026-05-01T05-59-56.ogg
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    nchan: '1'
+    repeat: 'False'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [376, 196.0]
+    rotation: 0
+    state: enabled
+- name: satellites_kiss_file_sink_0
+  id: satellites_kiss_file_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    append: 'False'
+    comment: ''
+    file: C:\Users\whdyd\sat\decoded\SatelliteSystemPractice.kiss
+    options: '""'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1024, 292.0]
+    rotation: 0
+    state: enabled
+- name: satellites_satellite_decoder_0
+  id: satellites_satellite_decoder
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    definition: norad
+    file: ''
+    iq: 'False'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    name: ''
+    norad: '39444'
+    options: '" --f_offset 12000 --syncword_threshold 16"'
+    samp_rate: samp_rate
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [704, 180.0]
+    rotation: 0
+    state: enabled
+
+connections:
+- [blocks_wavfile_source_0, '0', satellites_satellite_decoder_0, '0']
+- [satellites_satellite_decoder_0, out, blocks_message_debug_0, print_pdu]
+- [satellites_satellite_decoder_0, out, satellites_kiss_file_sink_0, in]
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.12.0

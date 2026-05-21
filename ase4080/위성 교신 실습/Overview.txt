@@ -1,0 +1,9 @@
+1. 폴더 구성
+audio - SatNOGS 오디오 파일
+decoded - 오디오 파일을 GNURadio에서 디코딩한 kiss파일
+scripts -  kiss파일에서 funcube telemetry를 파싱하는 파이썬 코드
+parsed - 파싱된 telemetry csv 파일
+
+2. 사용법
+ 1. gnuradio에서 SatelliteSystemPractice.grc를 열고 audio 파일 선택 및 실행(강의자료에 포함)
+ 2. /scripts/my_funcube_parser.py 스크립트 실행

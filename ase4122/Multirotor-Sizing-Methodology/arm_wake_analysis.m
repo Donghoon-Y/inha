@@ -5,6 +5,15 @@
 %   [1안 기준]  main → arm_wake_analysis
 %   [2안 기준]  main → forward_flight_analysis → arm_wake_analysis
 %
+% 권장 실행:
+%   1안 실행 전:
+%       armWakeDesignMode = 1;
+%       run('arm_wake_analysis.m');
+%
+%   2안 실행 전:
+%       armWakeDesignMode = 2;
+%       run('arm_wake_analysis.m');
+%
 % 목적:
 %   선정된 프롭 기준으로 arm 형상/두께/위치 범위 전체를 계산하여
 %   공력 손실 최소 후보 및 허용 손실률 이내 최대 두께를 도출.
@@ -12,7 +21,7 @@
 % 이론:
 %   Actuator disk theory, hover condition
 %     v_i     = sqrt(T / (2*rho*A))
-%     v_wake  = k * v_i          (k: 위치에 따른 wake 속도 계수)
+%     v_wake  = k * v_i
 %     D_arm   = 0.5*rho*v_wake^2*Cd*A_proj
 %     DeltaP  = arm 손실 보상을 위한 추가 기계출력 [W]
 %
@@ -20,25 +29,29 @@
 %   propSpecification   — 1안 프롭 사양
 %   operatingPoints     — 후보 프롭별 운용점
 %   temp_propChosen_pos — 1안 선정 프롭 인덱스
-%   RotorNo             — 로터 수 (전기출력 합산용)
-%   motorChosen         — 선정 모터 (전기 파워 참조, 없으면 NaN 처리)
+%   RotorNo             — 로터 수
+%   motorChosen         — 1안 선정 모터
 %
-% 참조하는 Workspace 변수 (forward_flight_analysis.m 출력, 있으면 2안 우선):
-%   prop_ff             — 2안 프롭 사양 (1×6 cell)
-%   idx_ff_best         — 2안 프롭 인덱스 (operatingPoints 참조용)
-%   motorChosen_ff      — 2안 모터 (전기 파워 참조)
+% 참조하는 Workspace 변수 (forward_flight_analysis.m 출력, 2안):
+%   prop_ff             — 2안 프롭 사양
+%   idx_ff_best         — 2안 프롭 인덱스
+%   motorChosen_ff      — 2안 선정 모터
 % =========================================================================
 
-%% 사전 확인: 필수 변수 존재 여부
+%% 사전 확인: main.m 필수 변수 존재 여부
 required_vars = {'propSpecification', 'operatingPoints', ...
                  'temp_propChosen_pos', 'RotorNo'};
+
 missing = {};
 for v = required_vars
-    if ~exist(v{1}, 'var'), missing{end+1} = v{1}; end
+    if ~exist(v{1}, 'var')
+        missing{end+1} = v{1}; %#ok<SAGROW>
+    end
 end
+
 if ~isempty(missing)
-    error('arm_wake_analysis: 다음 변수가 없습니다. main.m을 먼저 실행하세요.\n  누락: %s', ...
-        strjoin(missing, ', '));
+    error(['arm_wake_analysis: 다음 변수가 없습니다. main.m을 먼저 실행하세요.' newline ...
+           '누락: %s'], strjoin(missing, ', '));
 end
 
 %% 물리 상수
@@ -46,47 +59,89 @@ rho   = 1.225;     % 공기 밀도 [kg/m^3]
 g_acc = 9.80665;   % 중력가속도 [m/s^2]
 IN2M  = 0.0254;    % inch -> m
 
-%% 설계 파라미터
-targetLossPct        = 1.0;        % 허용 추력 손실률 [%]
+%% 공통 설계 파라미터
+targetLossPct        = 1.0;         % 허용 추력 손실률 [%]
 armThickness_mm_list = 11:1:20;     % arm 두께 후보 [mm]
-yOverR_list          = 0:0.05:0.20;% arm 중심선 offset (y/R=0: 로터 중심 통과)
-zOverR_list          = 0.272:0.05:1.00; % arm 수직 위치 (z/R=0.05: 디스크 바로 아래)
-wakeCrossMode        = "radius";   % "radius" 또는 "diameter"
-St                   = 0.20;       % Strouhal number (원형 실린더 근사)
-bladeNo              = 3;          % 프롭 블레이드 수
+yOverR_list          = 0:0.05:0.20; % arm 중심선 offset
+wakeCrossMode        = "radius";    % "radius" 또는 "diameter"
+St                   = 0.20;        % Strouhal number
 
-% 형상별 대표 항력계수 (1차 근사, 실제 값은 Re/표면/자세에 따라 다름)
-shapeName = ["circular"; "square"; "elliptic"; "streamlined"];
-Cd_list   = [1.10;       1.80;     0.50;       0.15];
+% zOverR_list와 bladeNo는 1안/2안 판별 후 자동 지정
+
+%% 분석 모드 판별
+% 우선순위:
+%   1) armWakeDesignMode가 있으면 해당 값으로 강제 판별
+%   2) 없으면 prop_ff, idx_ff_best 존재 여부로 2안 판단
+%   3) 그 외에는 1안
+
+if exist('armWakeDesignMode', 'var') && ~isempty(armWakeDesignMode)
+    if armWakeDesignMode == 1
+        isDesign2 = false;
+    elseif armWakeDesignMode == 2
+        isDesign2 = true;
+    else
+        error('armWakeDesignMode는 1 또는 2만 사용할 수 있습니다.');
+    end
+else
+    isDesign2 = exist('prop_ff', 'var') && ~isempty(prop_ff) && ...
+                exist('idx_ff_best', 'var') && ~isempty(idx_ff_best);
+end
 
 %% 분석 대상 프롭 및 운용점 선택
-% prop_ff(2안)가 있으면 2안 프롭 기준으로 분석,
-% 없으면 1안 프롭(temp_propChosen_pos) 기준으로 분석.
-if exist('prop_ff','var') && ~isempty(prop_ff) && ...
-   exist('idx_ff_best','var') && ~isempty(idx_ff_best)
+if isDesign2
+
+    %% ------------------------------------------------------------
+    % 2안: 기동성 최적 프롭 기준
+    % ------------------------------------------------------------
+    if ~exist('prop_ff', 'var') || isempty(prop_ff) || ...
+       ~exist('idx_ff_best', 'var') || isempty(idx_ff_best)
+
+        error(['2안 분석을 선택했지만 prop_ff 또는 idx_ff_best가 없습니다.' newline ...
+               'main.m 실행 후 forward_flight_analysis.m을 먼저 실행하세요.']);
+    end
+
     analysis_mode  = '2안 (기동성 최적 프롭)';
+    design_id      = 2;
+    design_tag     = 'design2_maneuverability';
+
     prop_name      = string(prop_ff{1});
     prop_diam_in   = prop_ff{3};
     prop_pitch_in  = prop_ff{4};
     prop_idx       = idx_ff_best;
 
+    % ===== 2안 전용 설정 =====
+    zOverR_list = 0.272:0.05:1.00;
+    bladeNo     = 3;
+
     % 2안 모터 전기 파워
-    if exist('motorChosen_ff','var') && ~isempty(motorChosen_ff) && numel(motorChosen_ff) >= 11
+    if exist('motorChosen_ff', 'var') && ~isempty(motorChosen_ff) && numel(motorChosen_ff) >= 11
         P_hover_el = motorChosen_ff{11};
-    elseif exist('motorChosen','var') && numel(motorChosen) >= 11
+    elseif exist('motorChosen', 'var') && ~isempty(motorChosen) && numel(motorChosen) >= 11
         P_hover_el = motorChosen{11};
     else
         P_hover_el = NaN;
     end
+
 else
+
+    %% ------------------------------------------------------------
+    % 1안: 호버/체공시간 최적 프롭 기준
+    % ------------------------------------------------------------
     analysis_mode  = '1안 (호버 최적 프롭)';
+    design_id      = 1;
+    design_tag     = 'design1_endurance';
+
     prop_name      = string(propSpecification{1});
     prop_diam_in   = propSpecification{2};
     prop_pitch_in  = propSpecification{3};
     prop_idx       = temp_propChosen_pos;
 
+    % ===== 1안 전용 설정 =====
+    zOverR_list = 0.26575:0.05:1.00;
+    bladeNo     = 2;
+
     % 1안 모터 전기 파워
-    if exist('motorChosen','var') && numel(motorChosen) >= 11
+    if exist('motorChosen', 'var') && ~isempty(motorChosen) && numel(motorChosen) >= 11
         P_hover_el = motorChosen{11};
     else
         P_hover_el = NaN;
@@ -113,9 +168,13 @@ f_BPF     = bladeNo * f_rotor;
 fprintf('\n============================================================\n');
 fprintf('[Arm Wake Interference Analysis]\n');
 fprintf('Analysis mode            : %s\n', analysis_mode);
+fprintf('Design ID                : %d\n', design_id);
 fprintf('============================================================\n');
 fprintf('Selected propeller       : %s\n', prop_name);
 fprintf('Propeller size           : %.1f x %.1f inch\n', prop_diam_in, prop_pitch_in);
+fprintf('Blade number             : %d\n', bladeNo);
+fprintf('z/R list                 : %.5f : %.2f : %.2f\n', ...
+    zOverR_list(1), zOverR_list(2)-zOverR_list(1), zOverR_list(end));
 fprintf('Propeller diameter D     : %.4f m\n', D);
 fprintf('Propeller radius R       : %.4f m\n', R);
 fprintf('Disk area A              : %.5f m^2\n', A_disk);
@@ -123,15 +182,21 @@ fprintf('Hover RPM                : %.0f rpm\n', RPM_hover);
 fprintf('Hover thrust/rotor       : %.1f gf = %.3f N\n', T_hover_gf, T_hover_N);
 fprintf('Hover torque/rotor       : %.4f Nm\n', Q_hover);
 fprintf('Hover mech. power/rotor  : %.2f W  (APC 실측)\n', P_hover_mech);
+
 if ~isnan(P_hover_el)
     fprintf('Hover elec. power/rotor  : %.2f W\n', P_hover_el);
 end
+
 fprintf('Induced velocity v_i     : %.3f m/s\n', v_i);
 fprintf('Rotor frequency          : %.2f Hz\n', f_rotor);
 fprintf('Blade passing frequency  : %.2f Hz\n', f_BPF);
 fprintf('Target thrust loss       : %.2f %%\n', targetLossPct);
 fprintf('Wake crossing mode       : %s\n', wakeCrossMode);
 fprintf('============================================================\n');
+
+%% 형상별 대표 항력계수
+shapeName = ["circular"; "square"; "elliptic"; "streamlined"];
+Cd_list   = [1.10;       1.80;     0.50;       0.15];
 
 %% 전체 파라미터 범위 계산
 rows = {};
@@ -169,6 +234,7 @@ for ss = 1:length(shapeName)
                     out.f_shed_Hz, out.f_rotor_Hz, out.f_BPF_Hz, ...
                     out.Diff_to_rotor_Hz, out.Diff_to_BPF_Hz, ...
                     out.Acceptable};
+
                 row = row + 1;
             end
         end
@@ -192,8 +258,6 @@ resultTable = cell2table(rows, 'VariableNames', { ...
 resultTable = sortrows(resultTable, {'ThrustLoss_pct','DeltaP_mech_W'});
 
 %% 전체 및 형상별 공력 손실 최소 후보
-
-% 전체 조합 중 공력 손실 최소 후보
 bestAeroCandidate = resultTable(1,:);
 
 fprintf('\n전체 공력 손실 최소 후보\n');
@@ -201,7 +265,6 @@ disp(bestAeroCandidate(:, {'Shape','Cd','ArmThickness_mm','y_over_R','y_mm', ...
     'z_over_R','z_mm','ThrustLoss_pct','DeltaP_mech_pct', ...
     'Blockage_pct','Acceptable'}));
 
-% 형상별 공력 손실 최소 후보
 shapeAeroBestRows = {};
 
 for ss = 1:length(shapeName)
@@ -240,19 +303,22 @@ acceptableTable = resultTable(resultTable.Acceptable == true, :);
 if isempty(acceptableTable)
     warning('허용 손실률 %.2f%% 이내의 후보가 없습니다.', targetLossPct);
 else
-    % 선정 우선순위: 허용 이내 > arm 두께 최소 > 추력 손실 최소 > 추가출력 최소
+    acceptableTable.SortThicknessNeg = -acceptableTable.ArmThickness_mm;
     acceptableSorted = sortrows(acceptableTable, ...
-        {'ArmThickness_mm','ThrustLoss_pct','DeltaP_mech_W'});
-    bestPracticalCandidate = acceptableSorted(1,:);
+        {'SortThicknessNeg','ThrustLoss_pct','DeltaP_mech_W'});
 
-    fprintf('\n허용 손실률 이내 최소 두께 후보\n');
+    bestPracticalCandidate = acceptableSorted(1,:);
+    bestPracticalCandidate.SortThicknessNeg = [];
+
+    fprintf('\n허용 손실률 이내 최대 두께 후보\n');
     disp(bestPracticalCandidate(:, {'Shape','Cd','ArmThickness_mm','y_over_R','y_mm', ...
         'z_over_R','z_mm','ThrustLoss_pct','DeltaP_mech_W','DeltaP_mech_pct', ...
         'Blockage_pct','v_wake','Acceptable'}));
 end
 
-%% 형상별 최적 후보 (허용 이내 최대 두께 우선)
+%% 형상별 최적 후보
 shapeBestRows = {};
+
 for ss = 1:length(shapeName)
     shape = shapeName(ss);
     sub   = acceptableTable(acceptableTable.Shape == shape, :);
@@ -263,7 +329,8 @@ for ss = 1:length(shapeName)
         continue;
     end
 
-    sub = sortrows(sub, {'ArmThickness_mm','ThrustLoss_pct','DeltaP_mech_W'});
+    sub.SortThicknessNeg = -sub.ArmThickness_mm;
+    sub = sortrows(sub, {'SortThicknessNeg','ThrustLoss_pct','DeltaP_mech_W'});
     tmp = sub(1,:);
 
     shapeBestRows(end+1,:) = { ...
@@ -279,11 +346,12 @@ shapeBestTable = cell2table(shapeBestRows, 'VariableNames', ...
      'Best_z_over_R','Best_z_mm','ThrustLoss_pct','DeltaP_mech_W', ...
      'Blockage_pct','HasAcceptableCandidate'});
 
-fprintf('\n형상별 최적 후보 — 허용 손실률 이내 최소 두께 우선\n');
+fprintf('\n형상별 최적 후보 — 허용 손실률 이내 최대 두께 우선\n');
 disp(shapeBestTable);
 
 %% 형상별 최대 허용 arm 두께
 maxThicknessRows = {};
+
 for ss = 1:length(shapeName)
     shape = shapeName(ss);
     sub   = acceptableTable(acceptableTable.Shape == shape, :);
@@ -312,6 +380,7 @@ maxThicknessTable = cell2table(maxThicknessRows, 'VariableNames', ...
 
 %% 두께별 최소 필요 offset
 offsetRows = {};
+
 for ss = 1:length(shapeName)
     shape = shapeName(ss);
 
@@ -325,6 +394,7 @@ for ss = 1:length(shapeName)
         else
             sub = sortrows(sub, {'y_over_R','ThrustLoss_pct','DeltaP_mech_W'});
             tmp = sub(1,:);
+
             offsetRows(end+1,:) = { ...
                 tmp.Shape(1), tmp.ArmThickness_mm(1), ...
                 tmp.y_over_R(1), tmp.y_mm(1), ...
@@ -340,15 +410,18 @@ minOffsetTable = cell2table(offsetRows, 'VariableNames', ...
 
 %% z/R 영향 분석
 zRows = {};
+
 for ss = 1:length(shapeName)
     shape = shapeName(ss);
 
     for zz = 1:length(zOverR_list)
         zOverR = zOverR_list(zz);
-        sub    = resultTable(resultTable.Shape == shape & ...
-                             resultTable.z_over_R == zOverR, :);
-        sub    = sortrows(sub, {'ThrustLoss_pct','DeltaP_mech_W'});
-        tmp    = sub(1,:);
+
+        sub = resultTable(resultTable.Shape == shape & ...
+                          resultTable.z_over_R == zOverR, :);
+
+        sub = sortrows(sub, {'ThrustLoss_pct','DeltaP_mech_W'});
+        tmp = sub(1,:);
 
         zRows(end+1,:) = { ...
             tmp.Shape(1), tmp.z_over_R(1), tmp.z_mm(1), ...
@@ -367,19 +440,20 @@ fprintf('[최종 요약]  분석 기준: %s\n', analysis_mode);
 fprintf('============================================================\n');
 
 fprintf('\n1) 순수 공력 손실 최소 후보\n');
-fprintf('   Shape=%s, arm=%.1fmm, y/R=%.2f, z/R=%.2f\n', ...
+fprintf('   Shape=%s, arm=%.1fmm, y/R=%.2f, z/R=%.5f\n', ...
     bestAeroCandidate.Shape, bestAeroCandidate.ArmThickness_mm, ...
     bestAeroCandidate.y_over_R, bestAeroCandidate.z_over_R);
 fprintf('   Thrust loss=%.4f%%, DeltaP=%.4f W/rotor\n', ...
     bestAeroCandidate.ThrustLoss_pct, bestAeroCandidate.DeltaP_mech_W);
 
 if ~isempty(acceptableTable)
-    fprintf('\n2) 허용 손실률 %.1f%% 이내 최소 두께 후보\n', targetLossPct);
-    fprintf('   Shape=%s, arm=%.1fmm, y/R=%.2f, z/R=%.2f\n', ...
+    fprintf('\n2) 허용 손실률 %.1f%% 이내 최대 두께 후보\n', targetLossPct);
+    fprintf('   Shape=%s, arm=%.1fmm, y/R=%.2f, z/R=%.5f\n', ...
         bestPracticalCandidate.Shape, bestPracticalCandidate.ArmThickness_mm, ...
         bestPracticalCandidate.y_over_R, bestPracticalCandidate.z_over_R);
     fprintf('   Thrust loss=%.4f%%, DeltaP=%.4f W/rotor\n', ...
         bestPracticalCandidate.ThrustLoss_pct, bestPracticalCandidate.DeltaP_mech_W);
+
     if ~isnan(P_hover_el)
         fprintf('   추가 전기 출력 = %.4f W/rotor, %.4f W total\n', ...
             bestPracticalCandidate.DeltaP_el_W, ...
@@ -388,57 +462,94 @@ if ~isempty(acceptableTable)
 end
 
 fprintf('\n3) 형상별 최대 허용 두께\n');
+
 for i = 1:height(maxThicknessTable)
     if maxThicknessTable.HasAcceptableCandidate(i)
-        fprintf('   %-12s : %.1fmm 이하  (y/R=%.2f, z/R=%.2f, loss=%.3f%%)\n', ...
+        fprintf('   %-12s : %.1fmm 이하  (y/R=%.2f, z/R=%.5f, loss=%.3f%%)\n', ...
             maxThicknessTable.Shape(i), ...
             maxThicknessTable.MaxAllowableThickness_mm(i), ...
             maxThicknessTable.y_over_R(i), ...
             maxThicknessTable.z_over_R(i), ...
             maxThicknessTable.ThrustLoss_pct(i));
     else
-        fprintf('   %-12s : 허용 손실률 이내 후보 없음\n', maxThicknessTable.Shape(i));
+        fprintf('   %-12s : 허용 손실률 이내 후보 없음\n', ...
+            maxThicknessTable.Shape(i));
     end
 end
 
 %% 그래프
-% Fig 1. 형상별 두께에 따른 최소 손실률
 figure('Name','Thrust loss vs arm thickness', 'Position',[100 100 900 520]);
 hold on;
+
 for ss = 1:length(shapeName)
     shape      = shapeName(ss);
     minLossByD = nan(size(armThickness_mm_list));
+
     for dd = 1:length(armThickness_mm_list)
         sub = resultTable(resultTable.Shape == shape & ...
                           resultTable.ArmThickness_mm == armThickness_mm_list(dd), :);
         minLossByD(dd) = min(sub.ThrustLoss_pct);
     end
+
     plot(armThickness_mm_list, minLossByD, 'LineWidth', 1.6);
 end
+
 yline(targetLossPct, 'k--', 'Target loss');
-hold off; grid on;
+hold off;
+grid on;
 xlabel('Arm thickness or frontal height [mm]');
 ylabel('Minimum thrust loss [%]');
 ylim([0 4]);
 title(sprintf('형상별 arm 두께에 따른 최소 추력 손실률 — %s', analysis_mode));
 legend(shapeName, 'Location','northwest');
 
+%% 결과 저장
 outDir = 'results_arm_wake';
+
 if ~exist(outDir, 'dir')
     mkdir(outDir);
 end
 
-outFile = fullfile(outDir, 'arm_wake_analysis_result.xlsx');
+outFile = fullfile(outDir, sprintf('arm_wake_analysis_result_%s.xlsx', design_tag));
 
 writetable(resultTable,        outFile, 'Sheet', 'All Results');
+writetable(shapeAeroBestTable, outFile, 'Sheet', 'Aero Best by Shape');
 writetable(shapeBestTable,     outFile, 'Sheet', 'Best by Shape');
 writetable(maxThicknessTable,  outFile, 'Sheet', 'Max Thickness');
 writetable(minOffsetTable,     outFile, 'Sheet', 'Min Offset');
 writetable(zEffectTable,       outFile, 'Sheet', 'Z Effect');
 
 fprintf('\n결과 저장 완료: %s\n', outFile);
+
+%% Workspace export
+armWakeResult.design_id               = design_id;
+armWakeResult.design_tag              = design_tag;
+armWakeResult.analysis_mode            = analysis_mode;
+armWakeResult.prop_name                = prop_name;
+armWakeResult.prop_diam_in             = prop_diam_in;
+armWakeResult.prop_pitch_in            = prop_pitch_in;
+armWakeResult.bladeNo                  = bladeNo;
+armWakeResult.zOverR_list              = zOverR_list;
+armWakeResult.targetLossPct            = targetLossPct;
+armWakeResult.resultTable              = resultTable;
+armWakeResult.bestAeroCandidate        = bestAeroCandidate;
+armWakeResult.shapeAeroBestTable       = shapeAeroBestTable;
+armWakeResult.acceptableTable          = acceptableTable;
+armWakeResult.shapeBestTable           = shapeBestTable;
+armWakeResult.maxThicknessTable        = maxThicknessTable;
+armWakeResult.minOffsetTable           = minOffsetTable;
+armWakeResult.zEffectTable             = zEffectTable;
+
+if ~isempty(acceptableTable)
+    armWakeResult.bestPracticalCandidate = bestPracticalCandidate;
+else
+    armWakeResult.bestPracticalCandidate = table();
+end
+
 %% =========================================================================
 % 로컬 함수
+%% =========================================================================
+
 function out = calcArmWakeResult( ...
     D, R, A_disk, T_N, P_mech, P_el, ...
     RPM, bladeNo, rho, St, ...
@@ -446,26 +557,29 @@ function out = calcArmWakeResult( ...
 
     d_m = d_mm / 1000;
     y   = yOverR * R;
-    z   = zOverR * R;
+    z   = zOverR * R; %#ok<NASGU>
 
     if y >= R
         L_wake = 0;
     else
         chordLength = 2 * sqrt(R^2 - y^2);
+
         switch string(wakeCrossMode)
-            case "radius",   L_wake = chordLength / 2;
-            case "diameter", L_wake = chordLength;
+            case "radius"
+                L_wake = chordLength / 2;
+            case "diameter"
+                L_wake = chordLength;
             otherwise
                 error('wakeCrossMode는 "radius" 또는 "diameter"만 사용하세요.');
         end
     end
 
     v_i    = sqrt(T_N / (2 * rho * A_disk));
-    k      = 1 + min(max(zOverR, 0), 1);   % z/R=0 → k=1, z/R>=1 → k=2
+    k      = 1 + min(max(zOverR, 0), 1);
     v_wake = k * v_i;
     A_proj = d_m * L_wake;
 
-    D_arm         = 0.5 * rho * v_wake^2 * Cd * A_proj;
+    D_arm          = 0.5 * rho * v_wake^2 * Cd * A_proj;
     thrustLossPct = D_arm / T_N * 100;
     T_net         = T_N - D_arm;
 
@@ -477,7 +591,9 @@ function out = calcArmWakeResult( ...
     DeltaP_mech_pct = DeltaP_mech / P_mech * 100;
 
     if isnan(P_el)
-        P_new_el = NaN; DeltaP_el = NaN; DeltaP_el_pct = NaN;
+        P_new_el      = NaN;
+        DeltaP_el     = NaN;
+        DeltaP_el_pct = NaN;
     else
         P_new_el      = P_el * powerRatio;
         DeltaP_el     = P_new_el - P_el;
@@ -486,34 +602,38 @@ function out = calcArmWakeResult( ...
 
     f_rotor = RPM / 60;
     f_BPF   = bladeNo * f_rotor;
-    f_shed  = NaN;
-    if d_m > 0, f_shed = St * v_wake / d_m; end
 
-    out.Shape           = string(shape);
-    out.Cd              = Cd;
-    out.ArmThickness_mm = d_mm;
-    out.y_over_R        = yOverR;
-    out.y_mm            = y * 1000;
-    out.z_over_R        = zOverR;
-    out.z_mm            = z * 1000;
-    out.k               = k;
-    out.L_wake_mm       = L_wake * 1000;
-    out.A_proj_cm2      = A_proj * 1e4;
-    out.Blockage_pct    = A_proj / A_disk * 100;
-    out.v_i             = v_i;
-    out.v_wake          = v_wake;
-    out.D_arm_N         = D_arm;
-    out.T_net_N         = T_net;
-    out.ThrustLoss_pct  = thrustLossPct;
-    out.P_new_mech_W    = P_new_mech;
-    out.DeltaP_mech_W   = DeltaP_mech;
-    out.DeltaP_mech_pct = DeltaP_mech_pct;
-    out.P_new_el_W      = P_new_el;
-    out.DeltaP_el_W     = DeltaP_el;
-    out.DeltaP_el_pct   = DeltaP_el_pct;
-    out.f_shed_Hz       = f_shed;
-    out.f_rotor_Hz      = f_rotor;
-    out.f_BPF_Hz        = f_BPF;
+    if d_m > 0
+        f_shed = St * v_wake / d_m;
+    else
+        f_shed = NaN;
+    end
+
+    out.Shape            = string(shape);
+    out.Cd               = Cd;
+    out.ArmThickness_mm  = d_mm;
+    out.y_over_R         = yOverR;
+    out.y_mm             = y * 1000;
+    out.z_over_R         = zOverR;
+    out.z_mm             = zOverR * R * 1000;
+    out.k                = k;
+    out.L_wake_mm        = L_wake * 1000;
+    out.A_proj_cm2       = A_proj * 1e4;
+    out.Blockage_pct     = A_proj / A_disk * 100;
+    out.v_i              = v_i;
+    out.v_wake           = v_wake;
+    out.D_arm_N          = D_arm;
+    out.T_net_N          = T_net;
+    out.ThrustLoss_pct   = thrustLossPct;
+    out.P_new_mech_W     = P_new_mech;
+    out.DeltaP_mech_W    = DeltaP_mech;
+    out.DeltaP_mech_pct  = DeltaP_mech_pct;
+    out.P_new_el_W       = P_new_el;
+    out.DeltaP_el_W      = DeltaP_el;
+    out.DeltaP_el_pct    = DeltaP_el_pct;
+    out.f_shed_Hz        = f_shed;
+    out.f_rotor_Hz       = f_rotor;
+    out.f_BPF_Hz         = f_BPF;
     out.Diff_to_rotor_Hz = abs(f_shed - f_rotor);
     out.Diff_to_BPF_Hz   = abs(f_shed - f_BPF);
     out.Acceptable       = thrustLossPct <= targetLossPct;

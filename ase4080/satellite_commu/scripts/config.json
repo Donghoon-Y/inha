@@ -1,0 +1,4 @@
+{
+  "kiss_in": "../decoded/funcube.kiss",
+  "csv_out": "../parsed/funcube.csv"
+}

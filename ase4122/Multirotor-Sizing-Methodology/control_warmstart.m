@@ -94,23 +94,25 @@ cfg.RAD2RPM = 60/(2*pi);
 % Local fitting range around hover RPM
 cfg.fitBand = 0.20;              % hover RPM ±20%
 
-% Motor/ESC/prop first-order response time constant
+% Motor/ESC/prop first-order response time constant ->시간 지연을 고려한 것
 cfg.default_tau_m = 0.05;        % [s]
 
-% No-load RPM estimate
+% No-load RPM estimate -> 실제 모터 데이터 쓸  수 있는데 보수적으로 잡는 게  안전
 cfg.eta_noload = 0.85;
 
 % Rate-loop target dynamics
 cfg.zeta_rate = 0.80;
-cfg.wn_roll  = 8.0;              % [rad/s]
-cfg.wn_pitch = 8.0;              % [rad/s]
-cfg.wn_yaw   = 4.0;              % [rad/s]
+cfg.wn_roll  = 5.0;              % [rad/s]
+cfg.wn_pitch = 5.0;              % [rad/s]
+cfg.wn_yaw   = 0.5;              % [rad/s]
 
 % Third pole for rate PID design with motor lag
-cfg.thirdPoleMultiplier = 5.0;
+cfg.thirdPoleMultiplier = 5.0; %this value is experience value
 
 % PX4 conversion safety factor
-cfg.px4SafetyFactor = 0.50;
+% we play sils so we don't need margin
+% thus we need Safety Factor after SILS
+cfg.px4SafetyFactor = 1.0;
 
 % PX4 attitude P warm-start
 cfg.MC_ROLL_P  = 4.0;
@@ -132,17 +134,17 @@ design = fetchDesignFromWorkspace(cfg);
 % 아래 NaN을 실제 CATIA 계산값으로 교체해야 6-DOF/PID 계산 진행됨
 
 % Design 1
-design(1).Ixx = 1;
-design(1).Iyy = 1;
-design(1).Izz = 1;
+design(1).Ixx = 0.0444;
+design(1).Iyy = 0.0454;
+design(1).Izz = 0.0708;
 design(1).Ixy = 0;
 design(1).Ixz = 0;
 design(1).Iyz = 0;
 
 % Design 2
-design(2).Ixx = 1;
-design(2).Iyy = 1;
-design(2).Izz = 1;
+design(2).Ixx = 0.0444;
+design(2).Iyy = 0.0454;
+design(2).Izz = 0.0708;
 design(2).Ixy = 0;
 design(2).Ixz = 0;
 design(2).Iyz = 0;

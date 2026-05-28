@@ -112,7 +112,7 @@ cfg.thirdPoleMultiplier = 5.0; %this value is experience value
 % PX4 conversion safety factor
 % we play sils so we don't need margin
 % thus we need Safety Factor after SILS
-cfg.px4SafetyFactor = 1.0;
+cfg.px4SafetyFactor = 0.5;
 
 % PX4 attitude P warm-start
 cfg.MC_ROLL_P  = 4.0;
@@ -134,17 +134,17 @@ design = fetchDesignFromWorkspace(cfg);
 % 아래 NaN을 실제 CATIA 계산값으로 교체해야 6-DOF/PID 계산 진행됨
 
 % Design 1
-design(1).Ixx = 0.0444;
-design(1).Iyy = 0.0454;
-design(1).Izz = 0.0708;
+design(1).Ixx = 0.056;
+design(1).Iyy = 0.055;
+design(1).Izz = 0.107;
 design(1).Ixy = 0;
 design(1).Ixz = 0;
 design(1).Iyz = 0;
 
 % Design 2
-design(2).Ixx = 0.0444;
-design(2).Iyy = 0.0454;
-design(2).Izz = 0.0708;
+design(2).Ixx = 0.056;
+design(2).Iyy = 0.055;
+design(2).Izz = 0.107;
 design(2).Ixy = 0;
 design(2).Ixz = 0;
 design(2).Iyz = 0;

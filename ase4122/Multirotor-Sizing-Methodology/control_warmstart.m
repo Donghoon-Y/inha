@@ -134,20 +134,20 @@ design = fetchDesignFromWorkspace(cfg);
 % 아래 NaN을 실제 CATIA 계산값으로 교체해야 6-DOF/PID 계산 진행됨
 
 % Design 1
-design(1).Ixx = 0.056;
-design(1).Iyy = 0.055;
-design(1).Izz = 0.107;
-design(1).Ixy = 0;
-design(1).Ixz = 0;
-design(1).Iyz = 0;
+design(1).Ixx = 0.04231;
+design(1).Iyy = 0.04206;
+design(1).Izz = 0.07973;
+design(1).Ixy = -2.794e-4;
+design(1).Ixz = -9.829e-6;
+design(1).Iyz = -3.454e-6;
 
 % Design 2
-design(2).Ixx = 0.056;
-design(2).Iyy = 0.055;
-design(2).Izz = 0.107;
-design(2).Ixy = 0;
-design(2).Ixz = 0;
-design(2).Iyz = 0;
+design(2).Ixx = 3.498e-2;
+design(2).Iyy = 3.493e-2;
+design(2).Izz = 6.550e-2;
+design(2).Ixy = -3.024e-4;
+design(2).Ixz = -9.758e-6;
+design(2).Iyz = -2.574e-6;
 
 %% ================================================================
 % 3. Load existing APC propeller database
@@ -258,7 +258,7 @@ function design = fetchDesignFromWorkspace(cfg)
         cellNo = evalin('base', 'BattCellNo');
         cellV  = evalin('base', 'BattCellVoltage');
 
-        design(1).mass_kg = toNumeric(mass) / 1000;
+        design(1).mass_kg = 2.2695;
         design(1).arm_m = toNumeric(arm) / 1000;
         design(1).rotor_height_m = toNumeric(hgt);
         
@@ -290,7 +290,7 @@ function design = fetchDesignFromWorkspace(cfg)
         motor_ff = evalin('base', 'motorChosen_ff');
         esc_ff   = evalin('base', 'best_esc_ff');
 
-        design(2).mass_kg = toNumeric(mass) / 1000; 
+        design(2).mass_kg = 2.2556; 
         design(2).arm_m = toNumeric(arm) / 1000;
         design(2).rotor_height_m = toNumeric(hgt);
 

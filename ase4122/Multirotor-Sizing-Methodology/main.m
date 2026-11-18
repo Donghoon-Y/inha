@@ -1,4 +1,4 @@
-3%% ------------------------------------------------------------------------
+%% ------------------------------------------------------------------------
 % Multirotor Sizing Methodology
 % with Flight Time Estimation
 %
@@ -39,6 +39,9 @@
 %
 %   모터/ESC 선정 결과 (1안 기준):
 %     motorChosen          — 선정 모터 데이터 (1 × 12 cell)
+%     motorRankTable       — 후보 모터 전체 순위표
+%     motorChosenRank      — 선정 모터의 순위 [수정: 신규 추가]
+%     temp_motorChosen_pos — 선정 모터의 motorList 인덱스
 %     motorSpecification   — {name, kV, RPM_max, torque_max, ...}
 %     escSpecification     — 요구 ESC 전류 [A]
 %     best_esc             — 선정 ESC 데이터 (1 × N cell)
@@ -83,6 +86,15 @@ BattPeukertConstant    = 1.3;  % Peukert 상수 (LiPo 기준)
 BattVoltageSagConstant = 0.5/0.8*BattCellNo; % 전압 강하 상수 (80% DoD 기준 셀당 0.5V)
 BattHourRating         = 1;    % 배터리 기준 방전 시간 [h]
 
+%% ── [수정] 모터 수동 선택 옵션 ──────────────────────────────────────────
+% 'auto' : 순위 1위 자동 선택 (기존 동작)
+% 'rank' : MotorSelectRank 위 모터 선택
+% 'name' : 이름 + kV로 직접 지정 (권장: 조건이 바뀌어 순위가 변해도 같은 모터 유지)
+MotorSelectMode = 'name';
+MotorSelectRank = 2;
+MotorSelectName = 'MN3110';
+MotorSelectKV   = 700;
+
 %% ── Mass data [g] ────────────────────────────────────────────────────────
 % 고정 구조물
 mass_Frame            = 454; % 랜딩기어 포함
@@ -102,7 +114,7 @@ mass_Propeller_Est = 18;
 % 탑재물 및 배터리
 % mass_Payload = 977;
 mass_Payload = 500;
-mass_Battery = 500;  
+mass_Battery = 500;
 
 %% ── 총 무게 추정 (프롭·모터 선정 전 추정치) ───────────────────────────
 % 이 값으로 thrustHover_Est를 계산하여 프롭/모터 선정 전 과정에 사용.
@@ -197,17 +209,9 @@ for ii = 1:consideredNo
 end
 
 % 비추력 기준 선정 (thrustHover_Est 모든 후보 동일 → 비추력최대 = 파워최소)
-%
-%   선정 기준: selectionCriterion col2 (APC 실측 파워, operatingPoints{ii,x}(4))
-%   변경 이유:
-%     col1 = ω × Torque  (보간된 토크로 역산한 파워)
-%     col2 = APC .dat 실측 파워
-%   두 값은 "보간 오차"가 아니라 서로 다른 측정 경로에서 온 값이므로
-%   평균을 내면 물리적으로 애매한 값이 됨.
+%   선정 기준: selectionCriterion col2 (APC 실측 파워)
 %   aero_analysis / arm_wake_analysis 모두 실측 파워(col2)를 사용하므로
 %   선정 기준도 col2로 통일하여 파일 간 비추력 수치 일관성 확보.
-%
-%   참고: methodError는 두 측정 경로 간 차이를 모니터링하는 용도로 유지.
 sc_P = selectionCriterion(:,2);          % APC 실측 파워 [W]
 sc_P(isinf(sc_P) | isnan(sc_P)) = inf;
 specThrust_criterion = thrustHover_Est ./ sc_P;
@@ -236,17 +240,76 @@ end
 %   1:ID  2:name  3:ILimit(A)  4:mass(g)  5:kV  6:Rm(Ohm)
 %   7:op_Imax(A)  8:op_powerMaxEl(W)  9:op_effMax(%)
 %   10:op_IHover(A)  11:op_powerHoverEl(W)  12:op_effHover(%)
+
+% ── 순위용 기준값 컬럼 선택 ────────────────────────────────────────────
 switch OptimisationGoal
     case 'hover'
-        [~, temp_motorChosen_pos] = min([motorList{:,11}]);
+        rankValue     = [motorList{:,11}]';   % hover 전기 파워 [W], 낮을수록 좋음
+        criterionName = 'Hover Power (W)';
     case 'max'
-        [~, temp_motorChosen_pos] = min([motorList{:,8}]);
+        rankValue     = [motorList{:,8}]';    % WOT 전기 파워 [W], 낮을수록 좋음
+        criterionName = 'WOT Power (W)';
     case 'utilisation'
-        [~, temp_motorChosen_pos] = min(abs([motorList{:,3}]-[motorList{:,7}]));
+        rankValue     = abs([motorList{:,3}] - [motorList{:,7}])'; % 전류 여유, 낮을수록 좋음
+        criterionName = 'Current Margin (A)';
     otherwise
         error('ERROR! Wrong optimisation criteria!');
 end
-motorChosen = motorList(temp_motorChosen_pos,:);
+
+% ── 오름차순 정렬 (값이 작을수록 좋은 순위 1위) ───────────────────────
+[sortedValue, sortIdx] = sort(rankValue, 'ascend');
+
+% ── 순위표 생성 및 출력 ────────────────────────────────────────────────
+motorRankTable = table((1:length(sortIdx))', ...
+    motorList(sortIdx,2), ...
+    motorList(sortIdx,5), ...
+    sortedValue, ...
+    motorList(sortIdx,4), ...
+    'VariableNames', {'Rank','MotorName','kV','Criterion','Mass_g'});
+
+fprintf('\n[모터 순위표] 기준: %s (%s 모드, 오름차순 = 좋은 순)\n', ...
+    criterionName, OptimisationGoal);
+disp(motorRankTable);
+
+% ── [수정] 최종 선택: MotorSelectMode에 따라 결정 ──────────────────────
+switch MotorSelectMode
+    case 'auto'
+        temp_motorChosen_pos = sortIdx(1);
+
+    case 'rank'
+        if MotorSelectRank < 1 || MotorSelectRank > numel(sortIdx)
+            error('ERROR! MotorSelectRank=%d 는 후보 수(%d)를 벗어남', ...
+                MotorSelectRank, numel(sortIdx));
+        end
+        temp_motorChosen_pos = sortIdx(MotorSelectRank);
+
+    case 'name'
+        motorNames = strtrim(string(motorList(:,2)));
+        motorKVs   = [motorList{:,5}]';
+        hit = find(strcmpi(motorNames, MotorSelectName) & ...
+                   abs(motorKVs - MotorSelectKV) < 1e-6);
+        if isempty(hit)
+            error(['ERROR! %s (%g KV) 가 후보 목록에 없음. ' ...
+                   '질량 필터(mass_Motor_Est) 또는 운용점 조건 확인 필요'], ...
+                   MotorSelectName, MotorSelectKV);
+        end
+        temp_motorChosen_pos = hit(1);
+
+    otherwise
+        error('ERROR! Wrong MotorSelectMode!');
+end
+
+motorChosen     = motorList(temp_motorChosen_pos,:);
+motorChosenRank = find(sortIdx == temp_motorChosen_pos);   % 다운스트림 보고용
+
+fprintf('[모터 확정] %s (%g KV), 순위 %d위, %s = %.3f, 질량 %g g\n', ...
+    motorChosen{2}, motorChosen{5}, motorChosenRank, criterionName, ...
+    rankValue(temp_motorChosen_pos), motorChosen{4});
+if motorChosenRank ~= 1
+    fprintf('            (1위 %s 대비 %s 차이: %+.3f)\n', ...
+        motorList{sortIdx(1),2}, criterionName, ...
+        rankValue(temp_motorChosen_pos) - rankValue(sortIdx(1)));
+end
 
 %% ── 드라이브 사양 확정 ──────────────────────────────────────────────────
 % propSpecification  : {name, diam_in, pitch_in}
@@ -353,9 +416,9 @@ end
 
 disp(['APC ' propSpecification{1} ' propeller should be chosen for ' textOptimisation]);
 disp([motorSpecification{1} ' (' num2str(motorSpecification{2}) ...
-    ' KV) motor should be selected with ' ...
+    ' KV) motor (rank ' num2str(motorChosenRank) ') should be selected with ' ...
     num2str(round(motorSpecification{4}*100)/100) ' Nm torque at maximum speed of ' ...
-    num2str(round(motorSpecification{3}/100)*100) ' RPM.']);
+    num2str(round(motorSpecification{3}/100)*100) ' RPM.']);   % [수정] 순위 표시 추가
 disp(['One motor uses ' num2str(round(motorChosen{11})) ...
     ' W of electrical power at hover and ' num2str(round(motorChosen{8})) ...
     ' W of electrical power at WOT.']);
@@ -390,3 +453,59 @@ else
     fprintf('선정된 ESC: %s (허용 전류: %dA, 무게: %.1fg)\n', ...
         best_esc{2}, best_esc{3}, best_esc{4});
 end
+
+%% ── 순위 1~3위 모터 호버시간 비교 (정확한 수치) ─────────────────────────
+topN_flight = min(3, size(motorList,1));
+hoverTime_byRank  = zeros(topN_flight,1);
+hoverPower_byRank = zeros(topN_flight,1);
+
+fprintf('\n[순위별 호버시간 비교] (동일 프롭 장착 가정)\n');
+
+for rk = 1:topN_flight
+    mIdx = sortIdx(rk);
+    P_hover_rk = motorList{mIdx,11};   % [W] 모터 1개당 hover 전기파워
+
+    v_h = zeros(1,1);
+    i_h = zeros(1,1);
+    c_h = zeros(1,1);
+
+    v_h(1) = BattCellNo * (BattCellVoltage + 0.5);
+    i_h(1) = P_hover_rk * RotorNo / v_h(1);
+    c_h(1) = (i_h(1)^(1-BattPeukertConstant)) * ...
+        (BattHourRating^(1-BattPeukertConstant)) * (BattCapacity_Ah^BattPeukertConstant);
+
+    jj = 1;
+    while v_h(jj) > BattCellVoltage*BattCellNo && jj*timeStep < 2
+        v_h(jj+1) = v_h(1) - (BattVoltageSagConstant/c_h(1)) * (c_h(1) - c_h(jj));
+        i_h(jj+1) = P_hover_rk * RotorNo / v_h(jj+1);
+        c_h(jj+1) = (i_h(jj+1)^(1-BattPeukertConstant)) * ...
+            (BattHourRating^(1-BattPeukertConstant)) * (BattCapacity_Ah^BattPeukertConstant) ...
+            - sum(i_h(2:end) * timeStep);
+        jj = jj + 1;
+    end
+
+    hoverTime_byRank(rk)  = (jj-1) * timeStep;   % [h]
+    hoverPower_byRank(rk) = P_hover_rk;
+
+    t_h   = hoverTime_byRank(rk);
+    t_min = t_h * 60;
+    t_sec = t_h * 3600;
+
+    % [수정] 선택된 모터 표시
+    if mIdx == temp_motorChosen_pos, mark = ' ◀ 선택'; else, mark = ''; end
+    fprintf('  %d위 모터 %-15s : hover 전력 %.4f W → 호버시간 %.6f h = %.4f min = %.2f sec%s\n', ...
+        rk, motorList{mIdx,2}, P_hover_rk, t_h, t_min, t_sec, mark);
+end
+
+% ── 비교표 (반올림 없이 전체 자리수 표시) ──────────────────────────────
+hoverCompareTable = table((1:topN_flight)', ...
+    motorList(sortIdx(1:topN_flight),2), ...
+    hoverPower_byRank, ...
+    hoverTime_byRank*3600, ...
+    hoverTime_byRank*60, ...
+    'VariableNames', {'Rank','MotorName','HoverPower_W','HoverTime_sec','HoverTime_min'});
+
+fprintf('\n[호버시간 비교표 — 정확한 수치]\n');
+format long g
+disp(hoverCompareTable);
+format short

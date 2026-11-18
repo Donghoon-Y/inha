@@ -122,7 +122,7 @@ cfg.MC_YAW_P   = 2.0;
 % Optional: print A, B matrices
 cfg.printStateSpace = false;
 
-%% ================================================================
+%% ===============================ㅂ=================================
 % 2. Design input 생성 (Base Workspace에서 추출)
 % ================================================================
 design = fetchDesignFromWorkspace(cfg);
@@ -134,20 +134,20 @@ design = fetchDesignFromWorkspace(cfg);
 % 아래 NaN을 실제 CATIA 계산값으로 교체해야 6-DOF/PID 계산 진행됨
 
 % Design 1
-design(1).Ixx = 0.04231;
-design(1).Iyy = 0.04206;
-design(1).Izz = 0.07973;
-design(1).Ixy = -2.794e-4;
-design(1).Ixz = -9.829e-6;
-design(1).Iyz = -3.454e-6;
+design(1).Ixx = 0.04101;
+design(1).Iyy = 0.04076;
+design(1).Izz = 0.07779;
+design(1).Ixy = -2.1693e-4;
+design(1).Ixz = -1.1871e-5;
+design(1).Iyz = -1.376e-6;
 
 % Design 2
-design(2).Ixx = 3.498e-2;
-design(2).Iyy = 3.493e-2;
-design(2).Izz = 6.550e-2;
-design(2).Ixy = -3.024e-4;
-design(2).Ixz = -9.758e-6;
-design(2).Iyz = -2.574e-6;
+design(2).Ixx = 0.03315;
+design(2).Iyy = 0.03310;
+design(2).Izz = 0.06248;
+design(2).Ixy = -2.3874e-4;
+design(2).Ixz = -1.1750e-5;
+design(2).Iyz = -1.960e-6;
 
 %% ================================================================
 % 3. Load existing APC propeller database
